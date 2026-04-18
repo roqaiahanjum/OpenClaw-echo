@@ -532,8 +532,8 @@ import { SwarmOrchestrator, AgentRole } from "../core/swarm";
 export const delegateTaskTool = tool(
     async ({ role, task }: { role: string, task: string }) => {
         try {
-            if (!["Researcher", "Coder", "Analyst", "Writer"].includes(role)) {
-                return `Error: Invalid role. Must be one of: Researcher, Coder, Analyst, Writer.`;
+            if (!["Researcher", "Coder", "Analyst", "Writer", "QA_Engineer"].includes(role)) {
+                return `Error: Invalid role. Must be one of: Researcher, Coder, Analyst, Writer, QA_Engineer.`;
             }
             const report = await SwarmOrchestrator.delegateTask(role as AgentRole, task);
             return report;
@@ -546,7 +546,7 @@ export const delegateTaskTool = tool(
         name: "delegate_task",
         description: "The Swarm Engine: Assigns a complex, time-consuming sub-task to a highly specialized Sub-Agent. The Sub-Agent will work in parallel and return a detailed report. Use this to break down massive tasks or get expert analysis.",
         schema: z.object({
-            role: z.enum(["Researcher", "Coder", "Analyst", "Writer"]).describe("The specialized persona of the Sub-Agent"),
+            role: z.enum(["Researcher", "Coder", "Analyst", "Writer", "QA_Engineer"]).describe("The specialized persona of the Sub-Agent"),
             task: z.string().describe("A highly detailed prompt/task description for the Sub-Agent to execute")
         })
     }

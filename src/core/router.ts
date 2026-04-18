@@ -19,10 +19,9 @@ export class ModelRouter {
         try {
             this.cloudModel = new ChatGoogleGenerativeAI({
                 apiKey: process.env.GOOGLE_API_KEY,
-                model: "gemini-1.5-flash", 
-                apiVersion: "v1", // ✅ Explicitly setting stable v1 to avoid 404 on v1beta
+                model: "gemini-2.5-flash", // Upgraded to latest supported flash model
             });
-            console.log("[Router] 🟢 Google Gemini Bridge established (v1)!");
+            console.log("[Router] 🟢 Google Gemini Bridge established (v1beta)!");
         } catch (error: any) {
             console.error("[Router] Gemini Handshake Error:", error.message);
         }
