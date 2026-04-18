@@ -82,6 +82,12 @@ function App() {
     setChatLoading(false);
   }
 
+  const handleTestDrive = async () => {
+    try {
+      await fetch('/api/test-drive', { method: 'POST' });
+    } catch(err) {}
+  };
+
   return (
     <>
       <div className="orb orb-1"></div>
@@ -126,7 +132,7 @@ function App() {
             </div>
           </div>
           
-          <button style={{ width: '100%', padding: '1rem', marginTop: '1rem', borderRadius: '12px', border: 'none', background: 'linear-gradient(to right, #38bdf8, #818cf8)', color: 'white', fontWeight: 600, cursor: 'pointer' }}>
+          <button onClick={handleTestDrive} style={{ width: '100%', padding: '1rem', marginTop: '1rem', borderRadius: '12px', border: 'none', background: 'linear-gradient(to right, #38bdf8, #818cf8)', color: 'white', fontWeight: 600, cursor: 'pointer' }}>
             🚀 Test Connectivity
           </button>
         </div>
@@ -137,7 +143,7 @@ function App() {
              {logs.length === 0 ? <p className="text-muted" style={{textAlign: 'center', marginTop: '2rem'}}>Awaiting LangChain engine logs...</p> : null}
              {logs.map((log, i) => (
                <div key={i} style={{ marginBottom: '0.5rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.5rem' }}>
-                 <span style={{ color: 'var(--accent)', marginRight: '1rem' }}>[{new Date(log.timestamp).toLocaleTimeString()}]</span>
+                 <span style={{ color: 'var(--accent)', marginRight: '1rem' }}>[{log.timestamp}]</span>
                  <span style={{ color: log.content.includes("Error") ? 'var(--error)' : 'var(--text-primary)' }}>{log.content}</span>
                </div>
              ))}
