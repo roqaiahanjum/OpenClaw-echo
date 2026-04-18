@@ -4,18 +4,34 @@
 ---
 
 ## 🚀 Overview
-**OpenClaw Echo** is a massively capable, self-orchestrating AI layer. Unlike standard chatbots, Echo exists as an independent entity capable of maintaining persistent memory and automatically pushing updates to its own version control.
+**OpenClaw Echo** is a massively capable, self-orchestrating AI layer. Unlike standard reactive chatbots, Echo exists as an independent entity capable of maintaining persistent memory, scheduling its own background tasks, and pushing updates to its own version control.
 
-### 🔑 Key Framework Pillars
-* **Hybrid Intelligence (ModelRouter):** Seamlessly fail-over between Google Gemini 1.5 Flash and Ollama Llama 3.
-* **The Swarm (Delegation Strategy):** Primary Manager agent can spawn asynchronous sub-agents (Researcher, Coder, Analyst).
-* **The Engineer (Git Ops):** Integrated `simple-git` bindings for autonomous repository management.
-* **Real-time Telemetry:** A web dashboard at `localhost:3005` for live logs and health maps.
+## 🏗️ Project Structure
+Understanding the directory layout of the OpenClaw ecosystem:
 
+```text
+open-claw-project/
+├── src/
+│   ├── core/           # The Brain: Swarm logic and Model Routing (Gemini/Ollama)
+│   ├── memory/         # The Vault: Semantic memory and Vector storage
+│   ├── skills/         # The Tools: Custom tools for the agent (Web search, Git ops)
+│   ├── integrations/   # The Bridge: Telegram Bot and Webhook logic
+│   └── types/          # The Blueprint: TypeScript interfaces and definitions
+├── dashboard/          # The Command Center: Frontend React/Next.js monitoring
+├── scripts/            # Utility scripts for database migration and setup
+├── .env                # Environment variables (API Keys - DO NOT PUSH)
+├── package.json        # Dependencies and build scripts
+└── tsconfig.json       # TypeScript configuration
 ---
 
-## 🛠️ Tech Stack
-![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white)
-![Node.js](https://img.shields.io/badge/Node.js-43853D?style=for-the-badge&logo=node.js&logoColor=white)
-![Ollama](https://img.shields.io/badge/Ollama-000000?style=for-the-badge&logo=llama&logoColor=white)
-![Telegram](https://img.shields.io/badge/Telegram-2CAE0?style=for-the-badge&logo=telegram&logoColor=white)
+### **2. How to "Force" your Folders to Appear**
+If you update the README but the **`src/`** or **`dashboard/`** folders still don't show up at the top of GitHub, it's because Git is ignoring them (likely due to a `.gitignore` file or they were never "indexed").
+
+**Run this exact "Nuclear" sequence to fix it:**
+
+1. **Delete any accidental sub-git folders (CRITICAL):**
+   Sometimes if you download a template, it has its own `.git` folder inside it. Run this:
+   ```powershell
+   Remove-Item -Recurse -Force .git
+   git init
+   git remote add origin https://github.com/roqaiahanjum/OpenClaw.git
