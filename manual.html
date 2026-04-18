@@ -1,0 +1,83 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>OpenClaw Echo | Official System Manual</title>
+    <style>
+        body { font-family: sans-serif; background: #0f172a; color: #f8fafc; padding: 2rem; line-height: 1.6; }
+        .card { background: rgba(255,255,255,0.05); padding: 2rem; border-radius: 20px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 2rem; }
+        h1, h2, h3 { color: #38bdf8; }
+        .tag { display: inline-block; padding: 0.2rem 0.6rem; background: #38bdf8; color: #0f172a; border-radius: 99px; font-size: 0.8rem; font-weight: bold; margin-right: 0.5rem; }
+        code { background: rgba(0,0,0,0.3); padding: 0.2rem 0.4rem; border-radius: 4px; font-family: monospace; }
+        pre { background: rgba(0,0,0,0.3); padding: 1rem; border-radius: 8px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>OpenClaw Echo System Manual</h1>
+        <p><strong>Generated At:</strong> 18/4/2026, 1:13:17 pm</p>
+        <p><strong>Sentinel Security Score:</strong> 90% (System Healthy)</p>
+    </div>
+
+    <div class="card">
+        <h2>1. System Architecture</h2>
+        <p>The framework operates on a 6-step autonomous flow: Receive → Context → Invoke → Tool Loop → Reply → Persist.</p>
+        <pre>graph TD
+  subgraph Core
+    R[ModelRouter] --> G[Gemini Engine]
+    L[Logger] --> D[Web Dashboard]
+  end
+
+  subgraph Integration
+    T[Telegram Adapter] --> E[6-Step Flow Engine]
+    W[Web Chat] --> E
+  end
+
+  subgraph Skills
+    E --> SR[Skill Registry]
+    SR --> Skill_registry[registry]
+    SR --> Skill_tools[tools]
+  end
+
+  subgraph Memory
+    E --> MM[Memory Manager]
+    MM --> SQL[(SQLite Recency)]
+    MM --> VEC[(Vector Core)]
+  end
+
+</pre>
+    </div>
+
+    <div class="card">
+        <h2>2. Core Intelligence</h2>
+        <ul>
+            <li><strong>Cloud Model:</strong> Google Gemini 1.5 Flash</li>
+            <li><strong>Local Bridge:</strong> Ollama (Hybrid Failover Enabled)</li>
+            <li><strong>Vision:</strong> Multi-modal image analysis bridge</li>
+            <li><strong>Voice:</strong> Neural TTS and Speech Recognition</li>
+        </ul>
+    </div>
+
+    <div class="card">
+        <h2>3. Autonomous Skill Fleet</h2>
+        <p>Existing registered capabilities:</p>
+        <ul>
+            <li><strong>web_search:</strong> Full internet connectivity via Serper.</li>
+            <li><strong>synthesize_skill:</strong> Self-evolution via runtime tool generation.</li>
+            <li><strong>run_sandbox_code:</strong> Isolated computational environment.</li>
+            <li><strong>ingest_to_memory:</strong> Specialized RAG document ingestion.</li>
+            <li><strong>generate_data_chart:</strong> Visual insight synthesis (SVG).</li>
+        </ul>
+    </div>
+
+    <div class="card">
+        <h2>4. Memory & RAG</h2>
+        <p>OpenClaw Echo uses a local-first, serverless vector memory system based on Google Gemini Embeddings and persistent JSON serialization.</p>
+    </div>
+
+    <footer style="text-align: center; opacity: 0.5; font-size: 0.8rem;">
+        Generated Autonomously by OpenClaw Echo Sentinel Engine
+    </footer>
+</body>
+</html>
+        
