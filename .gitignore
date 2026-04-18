@@ -16,3 +16,5 @@ openclaw.db
 src/memory/semantic_core.json
 scratch.ts
 test-gemini.ts
+
+scratch
