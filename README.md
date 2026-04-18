@@ -148,14 +148,27 @@ Once booted, the agent checks the environment. By default, it will start complet
 
 ## 📡 Live Telemetry Command Center
 
-Once booted, point your browser to **[http://localhost:3005](http://localhost:3005)** to enter the Live Diagnostic Hub.
-There you can view the neural connectivity graph, run sentinel system audits, monitor live LLM reasoning logs, and interact dynamically via the web-bot interface.
+OpenClaw Echo now features a breathtaking **React & Vite Frontend** designed with ultra-modern Glassmorphism.
+
+1. Ensure the Node backend is running (`npm start` in the root).
+2. Open a new terminal and run the dashboard:
+   ```bash
+   cd dashboard
+   npm run dev
+   ```
+3. Point your browser to **[http://localhost:5173](http://localhost:5173)** to enter the Live Diagnostic Hub.
+
+**Dashboard Features:**
+1. **Neural Connectivity Graph**: Real-time status of Gemini, Ollama, SQLite, and Vector Core visually mapped.
+2. **Sentinel Audit Engine**: Full system health check with live configuration alerts.
+3. **Live Sandbox Logs**: Server-Sent Events (SSE) stream the precise LangChain decision trees straight into your browser in real time!
+4. **Agent WebChat**: You can chat directly with your bot from the browser without needing a Telegram client.
 
 ### 🖼️ Screenshots
 > *(Placeholder for UI Screenshots)*
 > 
-> *Screenshot 1: The Live Telemetry Command Center Dashboard*
-> *Screenshot 2: Telegram Swarm Delegation deeply interacting with the code*
+> *Screenshot 1: The Glassmorphism Neural React Dashboard*
+> *Screenshot 2: Streaming LangChain WebChat Execution*
 > *Screenshot 3: Terminal View showing zero-latency API failovers*
 
 ---
