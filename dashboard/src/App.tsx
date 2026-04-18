@@ -41,14 +41,15 @@ function App() {
     
     // Server-Sent Events setup
     const eventSource = new EventSource('/api/stream');
-    eventSource.onmessage = (e) => {
+    
+    eventSource.addEventListener('log', (e) => {
       try {
-        const payload = JSON.parse(e.data);
-        if (payload.log) {
-          setLogs(prev => [...prev, payload.log].slice(-100)); // Keep last 100
+        const logEntry = JSON.parse(e.data); // { time, message }
+        if (logEntry && logEntry.message) {
+          setLogs(prev => [...prev, { timestamp: logEntry.time, content: logEntry.message }].slice(-100));
         }
       } catch (err) {}
-    };
+    });
 
     return () => {
       clearInterval(interval);
