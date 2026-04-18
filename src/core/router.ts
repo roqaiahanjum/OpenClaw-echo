@@ -19,9 +19,10 @@ export class ModelRouter {
         try {
             this.cloudModel = new ChatGoogleGenerativeAI({
                 apiKey: process.env.GOOGLE_API_KEY,
-                model: "gemini-1.5-flash", // Use stable flash
+                model: "gemini-1.5-flash", 
+                apiVersion: "v1", // ✅ Explicitly setting stable v1 to avoid 404 on v1beta
             });
-            console.log("[Router] 🟢 Google Gemini Bridge established!");
+            console.log("[Router] 🟢 Google Gemini Bridge established (v1)!");
         } catch (error: any) {
             console.error("[Router] Gemini Handshake Error:", error.message);
         }
@@ -64,14 +65,20 @@ export class ModelRouter {
                 
                 console.error(`[Router] Gemini Failure | Status: ${status} | Message: ${msg}`);
                 
-                const isRateLimit = msg.includes("429") || status === 429 || msg.toLowerCase().includes("too many requests");
-                const isRetryable = isRateLimit || msg.includes("503") || status === 503;
-                
-                if (isRetryable && retries > 1) {
-                    console.log(`[Router] Retryable error hit (${status}). Retrying in 5s... (${retries - 1} left)`);
-                    await new Promise(r => setTimeout(r, 5000));
-                    retries--;
-                    continue;
+                // Specialized handling for 404 (Model Not Found) - don't retry, fallback immediately
+                if (status === 404 || msg.includes("404") || msg.includes("not found")) {
+                    console.error("[Router] ❌ Model configuration error detected (404). Switching to fallback.");
+                    retries = 0; // Skip retries
+                } else {
+                    const isRateLimit = msg.includes("429") || status === 429 || msg.toLowerCase().includes("too many requests");
+                    const isRetryable = isRateLimit || msg.includes("503") || status === 503;
+                    
+                    if (isRetryable && retries > 1) {
+                        console.log(`[Router] Retryable error hit (${status}). Retrying in 5s... (${retries - 1} left)`);
+                        await new Promise(r => setTimeout(r, 5000));
+                        retries--;
+                        continue;
+                    }
                 }
 
                 // Fallback to Ollama if available

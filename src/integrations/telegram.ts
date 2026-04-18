@@ -11,6 +11,7 @@ import * as fs from "fs/promises";
 import { DashboardLogger } from "../core/logger";
 import { PERSONALITIES, PersonalityMode } from "../core/personalities";
 import { Telemetry } from "../core/telemetry";
+import { ProjectAnalyzer } from "../core/analyzer";
 
 dotenv.config();
 
@@ -144,6 +145,25 @@ async function executeAutonomousFlow(input: string, chatId: string, isPhoto: boo
 }
 
 /**
+ * Splits long text into chunks that fit within Telegram's character limit.
+ */
+function splitMessage(text: string, maxLength: number = 4000): string[] {
+    const chunks: string[] = [];
+    let current = text;
+    while (current.length > 0) {
+        if (current.length <= maxLength) {
+            chunks.push(current);
+            break;
+        }
+        let splitIndex = current.lastIndexOf("\n", maxLength);
+        if (splitIndex <= 100) splitIndex = maxLength; // Fallback if no good newline found
+        chunks.push(current.substring(0, splitIndex).trim());
+        current = current.substring(splitIndex).trim();
+    }
+    return chunks;
+}
+
+/**
  * Telegram Adapter: Maps Telegraf context to the Engine.
  */
 async function telegramHandler(ctx: Context) {
@@ -164,7 +184,12 @@ async function telegramHandler(ctx: Context) {
         input, 
         String(ctx.chat?.id), 
         isPhoto, 
-        async (content) => { await ctx.reply(content); },
+        async (content) => { 
+            const chunks = splitMessage(content);
+            for (const chunk of chunks) {
+                await ctx.reply(chunk);
+            }
+        },
         photoLink
     );
 }

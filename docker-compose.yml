@@ -1,15 +1,41 @@
 version: '3.8'
 
 services:
+  # ── Ollama (Local AI Engine) ──────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: openclaw-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── OpenClaw Echo (Main Agent) ────────────────────
   open-claw-echo:
     build: .
+    container_name: openclaw-echo
     ports:
       - "3005:3005"
     env_file:
       - .env
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - OLLAMA_MODEL=llama3
     volumes:
       - ./src/sandbox:/app/src/sandbox
       - ./src/skills/dynamic:/app/src/skills/dynamic
       - ./openclaw.db:/app/openclaw.db
-      - ./src/memory/semantic_core.json:/app/dist/memory/semantic_core.json
+      - ./src/memory/semantic_core.json:/app/src/memory/semantic_core.json
+    depends_on:
+      ollama:
+        condition: service_healthy
     restart: unless-stopped
+
+volumes:
+  ollama_data:
