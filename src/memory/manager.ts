@@ -206,6 +206,24 @@ export class MemoryManager {
         return finalContext;
     }
 
+    async clearHistory(): Promise<void> {
+        return new Promise((resolve, reject) => {
+            this.db.run("DELETE FROM interactions", async (err) => {
+                if (err) {
+                    reject(err);
+                } else {
+                    if (this.vectorStore) {
+                        // Preserve knowledge sources, drop conversational memory
+                        this.vectorStore.memoryVectors = this.vectorStore.memoryVectors.filter(v => v.metadata?.isKnowledge);
+                        await this.saveVectorStore();
+                    }
+                    console.log("[Memory] Chat history cleared.");
+                    resolve();
+                }
+            });
+        });
+    }
+
     async checkHealth() {
         const health = {
             sqlite: { status: "connected", details: "Local Database Ready." },

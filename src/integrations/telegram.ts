@@ -205,6 +205,17 @@ async function telegramHandler(ctx: Context) {
 
 // Handlers
 bot.command("start", (ctx) => ctx.reply("🚀 OpenClaw Echo is online and ready! Port: " + PORT));
+
+bot.command("clear", async (ctx) => {
+    try {
+        await memory.clearHistory();
+        await ctx.reply("🧹 Memory cleared! My context buffer has been completely reset. What's on your mind?");
+        DashboardLogger.log(`[System] User requested memory clear.`);
+    } catch(e) {
+        await ctx.reply("❌ Error clearing memory.");
+    }
+});
+
 bot.on(message("text"), telegramHandler);
 bot.on(message("photo"), telegramHandler);
 
