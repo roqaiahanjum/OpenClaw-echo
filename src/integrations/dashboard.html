@@ -1,0 +1,874 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenClaw Echo | Diagnostic Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <script>mermaid.initialize({ startOnLoad: true, theme: 'dark', securityLevel: 'loose' });</script>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --primary: #38bdf8;
+            --secondary: #818cf8;
+            --accent: #c084fc;
+            --success: #4ade80;
+            --error: #f43f5e;
+            --glass: rgba(255, 255, 255, 0.05);
+            --glass-border: rgba(255, 255, 255, 0.1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Outfit', sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            background: radial-gradient(circle at top right, #1e293b, #0f172a);
+            color: white;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow-x: hidden;
+        }
+
+        header {
+            padding: 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            font-size: 1.5rem;
+            font-weight: 600;
+            background: linear-gradient(to right, var(--primary), var(--accent));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -0.5px;
+        }
+
+        .status-badge {
+            background: var(--glass);
+            border: 1px solid var(--glass-border);
+            padding: 0.5rem 1rem;
+            border-radius: 99px;
+            font-size: 0.8rem;
+            backdrop-filter: blur(10px);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .pulse {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--success);
+            box-shadow: 0 0 10px var(--success);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.4; }
+            100% { opacity: 1; }
+        }
+
+        main {
+            flex: 1;
+            padding: 0 2rem 2rem 2rem;
+            display: grid;
+            grid-template-columns: repeat(12, 1fr);
+            gap: 1.5rem;
+            max-width: 1400px;
+            margin: 0 auto;
+            width: 100%;
+        }
+
+        /* Glass Card Base */
+        .glass-card {
+            background: var(--glass);
+            border: 1px solid var(--glass-border);
+            backdrop-filter: blur(20px);
+            border-radius: 24px;
+            padding: 2rem;
+            transition: transform 0.3s ease, hover 0.3s ease;
+        }
+
+        .glass-card:hover {
+            border-color: rgba(255, 255, 255, 0.2);
+            transform: translateY(-5px);
+        }
+
+        /* Brain Grid */
+        .brain-section {
+            grid-column: span 8;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        .system-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1rem;
+        }
+
+        .node {
+            text-align: center;
+            padding: 1.5rem;
+        }
+
+        .node-icon {
+            width: 60px;
+            height: 60px;
+            margin: 0 auto 1rem auto;
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            background: var(--glass);
+            position: relative;
+        }
+
+        .node.connected .node-icon {
+            background: linear-gradient(135deg, rgba(56, 189, 248, 0.2), rgba(129, 140, 248, 0.2));
+            box-shadow: 0 0 20px rgba(56, 189, 248, 0.1);
+        }
+
+        .node.error .node-icon {
+            border: 1px solid var(--error);
+        }
+
+        .node-name {
+            font-weight: 600;
+            display: block;
+            margin-bottom: 0.25rem;
+        }
+
+        .node-status {
+            font-size: 0.75rem;
+            opacity: 0.6;
+        }
+
+        /* Stats Sidebar */
+        .stats-sidebar {
+            grid-column: span 4;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        .stat-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .stat-label { opacity: 0.6; font-size: 0.9rem; }
+        .stat-value { font-weight: 600; }
+
+        /* Log Section */
+        .log-section {
+            grid-column: span 12;
+            height: 250px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .log-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 1rem;
+        }
+
+        .monitor-view {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 12px;
+            padding: 1rem;
+            flex: 1;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 0.85rem;
+            overflow-y: auto;
+            color: #94a3b8;
+        }
+
+        .log-entry { margin-bottom: 0.5rem; display: flex; gap: 1rem; }
+        .log-time { color: var(--primary); font-weight: bold; }
+
+        /* Voice Visualizer */
+        .voice-active {
+            animation: voice-pulse 1.5s infinite;
+        }
+
+        @keyframes voice-pulse {
+            0% { box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.4); }
+            70% { box-shadow: 0 0 0 15px rgba(56, 189, 248, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(56, 189, 248, 0); }
+        }
+
+        /* Animation Background Elements */
+        .orb {
+            position: fixed;
+            width: 400px;
+            height: 400px;
+            border-radius: 50%;
+            background: radial-gradient(circle, var(--primary), transparent 70%);
+            opacity: 0.1;
+            z-index: -1;
+            filter: blur(80px);
+        }
+
+        .orb-1 { top: -100px; left: -100px; background: radial-gradient(circle, var(--accent), transparent 70%); }
+        .orb-2 { bottom: -100px; right: -100px; background: radial-gradient(circle, var(--secondary), transparent 70%); }
+
+    </style>
+</head>
+<body>
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+
+    <header>
+        <div class="logo">OPENCLAW ECHO</div>
+        <div style="display: flex; gap: 1rem; align-items: center;">
+            <div class="status-badge" id="sentinel-score" style="border-color: var(--secondary); color: var(--secondary);">
+                SENTINEL SCORE: --%
+            </div>
+            <div class="status-badge">
+                <div class="pulse"></div>
+                SYSTEM OPERATIONAL
+            </div>
+        </div>
+    </header>
+
+    <main>
+        <section class="brain-section">
+            <div class="glass-card" style="grid-column: span 12;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <h4 style="color: var(--secondary);">Sentinel: Autonomous Health & Security Audit</h4>
+                    <div style="display: flex; gap: 0.5rem;">
+                        <button onclick="generateManual()" id="manual-btn" style="background: var(--glass); border: 1px solid var(--glass-border); color: white; padding: 0.3rem 0.8rem; border-radius: 8px; font-size: 0.7rem; cursor: pointer;">Generate Manual</button>
+                        <button onclick="runSentinelAudit()" id="audit-btn" style="background: var(--glass); border: 1px solid var(--glass-border); color: white; padding: 0.3rem 0.8rem; border-radius: 8px; font-size: 0.7rem; cursor: pointer;">Run Full Audit</button>
+                    </div>
+                </div>
+                <div id="manual-link" style="display: none; margin-bottom: 0.5rem; font-size: 0.75rem; color: var(--primary);">
+                    ✅ Manual ready: <a href="/api/sandbox/raw?file=manual.html" target="_blank" style="color: var(--primary); font-weight: bold;">View System Manual</a>
+                </div>
+                <div id="audit-results" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem;">
+                    <!-- Audit items filled by JS -->
+                </div>
+            </div>
+            <div class="glass-card">
+                <h3 style="margin-bottom: 1.5rem; font-weight: 300;">Neural Connectivity</h3>
+                <div class="system-grid">
+                    <div class="node connected" id="node-gemini">
+                        <div class="node-icon">🤖</div>
+                        <span class="node-name">Google Gemini</span>
+                        <span class="node-status" id="status-gemini">Connecting...</span>
+                    </div>
+                    <div class="node" id="node-sqlite">
+                        <div class="node-icon">💾</div>
+                        <span class="node-name">SQLite History</span>
+                        <span class="node-status" id="status-sqlite">Checking...</span>
+                    </div>
+                    <div class="node" id="node-chroma">
+                        <div class="node-icon">🌀</div>
+                        <span class="node-name">Vector Core</span>
+                        <span class="node-status" id="status-chroma">Offline</span>
+                    </div>
+                    <div class="node" id="node-ollama">
+                        <div class="node-icon">🦙</div>
+                        <span class="node-name">Ollama Local</span>
+                        <span class="node-status" id="status-ollama">Offline</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="glass-card log-section">
+                <div class="log-header">
+                    <h4>Live Interaction Log</h4>
+                    <span style="font-size: 0.8rem; opacity: 0.5;">Auto-updating...</span>
+                </div>
+                <div class="monitor-view" id="log-container">
+                    <div class="log-entry">
+                        <span class="log-time">[System]</span>
+                        <span>Dashboard connection initialized...</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="glass-card" style="grid-column: span 12;">
+                <h4 style="margin-bottom: 1rem; color: var(--secondary);">Sandbox File Explorer</h4>
+                <div id="file-manifest" style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                    <!-- Files filled by JS -->
+                </div>
+            </div>
+
+            <div class="glass-card" style="grid-column: span 12;">
+                <h4 style="margin-bottom: 1rem; color: var(--primary);">Autonomous Visual Insights (Analysis)</h4>
+                <div id="insights-gallery" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem;">
+                    <!-- SVG Insights filled by JS -->
+                    <span style="grid-column: span 2; font-size: 0.8rem; opacity: 0.5;">No visual insights synthesized yet.</span>
+                </div>
+            </div>
+
+            <div class="glass-card" style="grid-column: span 12;">
+                <h4 style="margin-bottom: 1rem; color: #8b5cf6;">The Oracle: Goal Nexus (Missions)</h4>
+                <div id="goal-nexus" style="display: flex; flex-direction: column; gap: 1rem;">
+                    <span style="font-size: 0.8rem; opacity: 0.5;">No active missions tracking.</span>
+                </div>
+            </div>
+
+            <div class="glass-card" style="grid-column: span 12;">
+                <h4 style="margin-bottom: 1rem; color: #f59e0b;">The Clockwork: Autonomous Scheduler</h4>
+                <div id="clockwork-schedules" style="display: flex; flex-direction: column; gap: 1rem;">
+                    <span style="font-size: 0.8rem; opacity: 0.5;">No active scheduled tasks.</span>
+                </div>
+            </div>
+
+            <div class="glass-card" style="grid-column: span 12;">
+                <h4 style="margin-bottom: 1rem; color: var(--success);">Scholar's Research Vault (RAG)</h4>
+                <div id="knowledge-manifest" style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                    <span style="font-size: 0.8rem; opacity: 0.5;">No specialized knowledge ingested yet.</span>
+                </div>
+            </div>
+
+            <div class="glass-card" style="grid-column: span 12;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                    <h4 style="color: var(--accent);">Architect's Eye: Live System Blueprint</h4>
+                    <button onclick="refreshMap()" style="background: var(--glass); border: 1px solid var(--glass-border); color: white; padding: 0.3rem 0.8rem; border-radius: 8px; font-size: 0.7rem; cursor: pointer;">Reload Map</button>
+                </div>
+                <div id="architecture-diagram" class="mermaid" style="background: rgba(0,0,0,0.2); border-radius: 12px; padding: 1rem; overflow: auto; min-height: 200px; display: flex; justify-content: center;">
+                    graph TD
+                    Start[Initialization] --> Model[Gemini 1.5 Flash]
+                    Model --> Success[Ready]
+                </div>
+            </div>
+        </section>
+
+        <section class="stats-sidebar">
+            <div class="glass-card">
+                <h4 style="margin-bottom: 1rem; color: var(--primary);">Agent Performance</h4>
+                <div class="stat-item">
+                    <span class="stat-label">Persona Mode</span>
+                    <select id="persona-select" onchange="changePersona()" style="background: rgba(255,255,255,0.1); border: 1px solid var(--glass-border); color: white; border-radius: 8px; padding: 0.2rem 0.5rem; font-size: 0.8rem; outline: none; cursor: pointer;">
+                        <!-- Options filled by JS -->
+                    </select>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Response Time</span>
+                    <span class="stat-value">~1.5s</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Skills Online</span>
+                    <span class="stat-value" id="skill-count">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Expertise Nodes</span>
+                    <span class="stat-value" id="knowledge-count">0</span>
+                </div>
+                <button onclick="startTestDrive()" style="width: 100%; padding: 1rem; border-radius: 12px; border: none; background: linear-gradient(to right, var(--primary), var(--secondary)); color: white; font-weight: 600; cursor: pointer; margin-top: 1rem;">🚀 Start Test Drive</button>
+            </div>
+
+            <div class="glass-card" style="flex: 1;">
+                <h4 style="margin-bottom: 1rem; color: var(--accent);">Current Identity</h4>
+                <p id="system-persona" style="font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem; text-transform: uppercase; letter-spacing: 1px;">STANDARD AGENT</p>
+                <p id="system-mode-info" style="font-size: 0.8rem; opacity: 0.6; line-height: 1.5;">
+                    Operating in Hybrid Memory Mode. Active system prompt is dynamically adjusting to your needs.
+                </p>
+                <button onclick="clearLogs()" style="margin-top: 2rem; background: none; border: 1px solid var(--glass-border); color: var(--error); font-size: 0.7rem; padding: 0.5rem 1rem; border-radius: 99px; cursor: pointer;">Clear Console Logs</button>
+            </div>
+        </section>
+    </main>
+
+    <!-- Floating Chat Window -->
+    <div id="chat-window" style="position: fixed; bottom: 2rem; right: 2rem; width: 350px; height: 500px; background: rgba(15, 23, 42, 0.8); backdrop-filter: blur(20px); border: 1px solid var(--glass-border); border-radius: 20px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 50px rgba(0,0,0,0.5); z-index: 1000;">
+        <div style="padding: 1rem; background: rgba(255,255,255,0.05); border-bottom: 1px solid var(--glass-border); display: flex; justify-content: space-between; align-items: center;">
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <div id="voice-indicator" style="width: 8px; height: 8px; background: var(--secondary); border-radius: 50%; box-shadow: 0 0 10px var(--secondary);"></div>
+                <span style="font-weight: 600; font-size: 0.9rem;">Agent Echo</span>
+            </div>
+            <button onclick="toggleVoice()" id="voice-toggle" style="background: none; border: none; color: white; opacity: 0.5; cursor: pointer; display: flex; align-items: center;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 5L6 9H2v6h4l5 4V5zM19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+            </button>
+        </div>
+        <div id="chat-messages" style="flex: 1; overflow-y: auto; padding: 1rem; display: flex; flex-direction: column; gap: 1rem; scroll-behavior: smooth;">
+            <div style="background: rgba(255,255,255,0.05); padding: 0.8rem 1rem; border-radius: 12px 12px 12px 0; max-width: 85%; font-size: 0.85rem; line-height: 1.4;">
+                Hello! I am OpenClaw Echo. How can I assist you across the network today?
+            </div>
+        </div>
+        <div style="padding: 1rem; background: rgba(0,0,0,0.2); border-top: 1px solid var(--glass-border); display: flex; gap: 0.5rem;">
+            <button onclick="startDictation()" id="mic-btn" style="background: none; border: none; color: white; opacity: 0.5; cursor: pointer; display: flex; align-items: center;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+            </button>
+            <input type="text" id="chat-input" placeholder="Message agent..." style="flex: 1; background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); border-radius: 99px; padding: 0.5rem 1rem; color: white; outline: none; font-size: 0.85rem;">
+            <button onclick="sendWebMessage()" style="background: var(--primary); border: none; color: white; width: 32px; height: 32px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+            </button>
+        </div>
+    </div>
+
+    <script>
+        let voiceEnabled = false;
+        let isSpeaking = false;
+
+        function toggleVoice() {
+            voiceEnabled = !voiceEnabled;
+            const btn = document.getElementById('voice-toggle');
+            btn.style.opacity = voiceEnabled ? '1' : '0.5';
+            btn.style.color = voiceEnabled ? 'var(--primary)' : 'white';
+            if (!voiceEnabled) window.speechSynthesis.cancel();
+        }
+
+        function speakText(text) {
+            if (!voiceEnabled || !window.speechSynthesis) return;
+            window.speechSynthesis.cancel();
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.rate = 1.0;
+            utterance.pitch = 1.0;
+            
+            utterance.onstart = () => {
+                document.getElementById('voice-indicator').classList.add('voice-active');
+                isSpeaking = true;
+            };
+            utterance.onend = () => {
+                document.getElementById('voice-indicator').classList.remove('voice-active');
+                isSpeaking = false;
+            };
+            
+            window.speechSynthesis.speak(utterance);
+        }
+
+        function startDictation() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) {
+                alert("Speech recognition not supported in this browser.");
+                return;
+            }
+
+            const recognition = new SpeechRecognition();
+            const micBtn = document.getElementById('mic-btn');
+
+            recognition.onstart = () => {
+                micBtn.style.color = 'var(--error)';
+                micBtn.style.opacity = '1';
+                document.getElementById('voice-indicator').classList.add('voice-active');
+            };
+
+            recognition.onresult = (event) => {
+                const transcript = event.results[0][0].transcript;
+                document.getElementById('chat-input').value = transcript;
+            };
+
+            recognition.onerror = () => {
+                stopMic();
+            };
+
+            recognition.onend = () => {
+                stopMic();
+            };
+
+            function stopMic() {
+                micBtn.style.color = 'white';
+                micBtn.style.opacity = '0.5';
+                document.getElementById('voice-indicator').classList.remove('voice-active');
+            }
+
+            recognition.start();
+        }
+
+        async function sendWebMessage() {
+            const input = document.getElementById('chat-input');
+            const message = input.value.trim();
+            if (!message) return;
+
+            // Clear input
+            input.value = '';
+
+            // Add user message to UI
+            addChatMessage(message, true);
+
+            try {
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message })
+                });
+                const data = await response.json();
+                addChatMessage(data.response, false);
+                if (voiceEnabled) speakText(data.response);
+            } catch (err) {
+                addChatMessage("Connection error. Is the server running?", false);
+            }
+        }
+
+        function addChatMessage(text, isUser) {
+            const container = document.getElementById('chat-messages');
+            const msg = document.createElement('div');
+            msg.style.padding = '0.8rem 1rem';
+            msg.style.borderRadius = isUser ? '12px 12px 0 12px' : '12px 12px 12px 0';
+            msg.style.background = isUser ? 'var(--primary)' : 'rgba(255,255,255,0.05)';
+            msg.style.alignSelf = isUser ? 'flex-end' : 'flex-start';
+            msg.style.maxWidth = '85%';
+            msg.style.fontSize = '0.85rem';
+            msg.style.lineHeight = '1.4';
+            msg.style.boxShadow = isUser ? '0 5px 15px rgba(56, 189, 248, 0.3)' : 'none';
+            msg.innerText = text;
+            container.appendChild(msg);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        // Enter key support
+        document.getElementById('chat-input').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendWebMessage();
+        });
+
+        async function loadPersonalities() {
+            try {
+                const response = await fetch('/api/personality');
+                const data = await response.json();
+                const select = document.getElementById('persona-select');
+                select.innerHTML = '';
+                data.available.forEach(p => {
+                    const opt = document.createElement('option');
+                    opt.value = p.id;
+                    opt.innerText = p.label;
+                    if (p.id === data.current) opt.selected = true;
+                    select.appendChild(opt);
+                });
+            } catch (err) {}
+        }
+
+        async function changePersona() {
+            const mode = document.getElementById('persona-select').value;
+            try {
+                await fetch('/api/personality', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mode })
+                });
+                updateStatus();
+            } catch (err) {
+                alert("Failed to switch persona.");
+            }
+        }
+
+        async function startTestDrive() {
+            try {
+                const response = await fetch('/api/test-drive', { method: 'POST' });
+                const data = await response.json();
+                console.log("Test Drive initiated:", data.challenge);
+            } catch (err) {
+                alert("Failed to start test drive.");
+            }
+        }
+
+        async function clearLogs() {
+            // (Client-side clear for demo focus)
+            document.getElementById('log-container').innerHTML = '';
+        }
+
+        async function updateSandbox() {
+            try {
+                const response = await fetch('/api/sandbox');
+                const files = await response.json();
+                const container = document.getElementById('file-manifest');
+                const gallery = document.getElementById('insights-gallery');
+                
+                container.innerHTML = '';
+                let hasInsight = false;
+
+                for (const file of files) {
+                    const badge = document.createElement('div');
+                    badge.className = 'status-badge';
+                    badge.style.padding = '0.3rem 0.8rem';
+                    badge.style.fontSize = '0.7rem';
+                    badge.innerText = file;
+                    container.appendChild(badge);
+
+                    // If SVG, render in gallery
+                    if (file.endsWith('.svg')) {
+                        if (!hasInsight) {
+                            gallery.innerHTML = '';
+                            hasInsight = true;
+                        }
+                        // Only add if not already there (simple check)
+                        if (!document.getElementById(`gallery-${file}`)) {
+                            const wrapper = document.createElement('div');
+                            wrapper.id = `gallery-${file}`;
+                            wrapper.style.background = 'rgba(255,255,255,0.02)';
+                            wrapper.style.borderRadius = '12px';
+                            wrapper.style.padding = '1rem';
+                            wrapper.style.textAlign = 'center';
+                            
+                            const content = await fetch(`/api/sandbox/raw?file=${file}`).then(r => r.text());
+                            wrapper.innerHTML = content;
+                            gallery.appendChild(wrapper);
+                        }
+                    }
+                }
+            } catch (err) {}
+        }
+
+        async function updateStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+
+                // Update Gemini
+                document.getElementById('status-gemini').innerText = data.router.gemini.details;
+                document.getElementById('node-gemini').className = 'node ' + (data.router.gemini.status === 'connected' ? 'connected' : 'error');
+
+                // Update SQLite
+                document.getElementById('status-sqlite').innerText = data.memory.sqlite.details;
+                document.getElementById('node-sqlite').className = 'node ' + (data.memory.sqlite.status === 'connected' ? 'connected' : 'error');
+
+                // Update Chroma
+                document.getElementById('status-chroma').innerText = data.memory.chroma.details;
+                document.getElementById('node-chroma').className = 'node ' + (data.memory.chroma.status === 'connected' ? 'connected' : 'error');
+
+                // Update Ollama
+                document.getElementById('status-ollama').innerText = data.router.ollama.details;
+                document.getElementById('node-ollama').className = 'node ' + (data.router.ollama.status === 'connected' ? 'connected' : 'error');
+
+                // Stats
+                document.getElementById('skill-count').innerText = data.skills;
+                document.getElementById('system-persona').innerText = data.personality;
+
+                updateKnowledge();
+                updateSandbox();
+                updateGoals();
+                updateSchedules();
+            } catch (err) {
+                console.error("Failed to fetch status:", err);
+            }
+        }
+
+        async function updateGoals() {
+            try {
+                const response = await fetch('/api/goals');
+                const goals = await response.json();
+                const container = document.getElementById('goal-nexus');
+                
+                if (goals.length === 0) {
+                    container.innerHTML = '<span style="font-size: 0.8rem; opacity: 0.5;">No active missions tracking.</span>';
+                    return;
+                }
+                
+                container.innerHTML = '';
+                goals.forEach(goal => {
+                    const card = document.createElement('div');
+                    card.style.background = 'rgba(255,255,255,0.05)';
+                    card.style.padding = '1rem';
+                    card.style.borderRadius = '12px';
+                    card.style.border = '1px solid var(--glass-border)';
+                    
+                    let subtasksHtml = '';
+                    if (goal.subtasks && goal.subtasks.length > 0) {
+                        subtasksHtml = '<ul style="margin-top: 0.5rem; padding-left: 1.2rem; font-size: 0.8rem; color: #94a3b8;">' + 
+                            goal.subtasks.map(s => `<li>${s.completed ? '✅' : '⏳'} ${s.title}</li>`).join('') + 
+                            '</ul>';
+                    }
+                    
+                    card.innerHTML = `
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                            <strong style="color: #c4b5fd;">${goal.title}</strong>
+                            <span class="status-badge" style="border-color: #8b5cf6; color: #8b5cf6;">${goal.progress}%</span>
+                        </div>
+                        <div style="font-size: 0.85rem; opacity: 0.8;">${goal.description}</div>
+                        ${subtasksHtml}
+                    `;
+                    container.appendChild(card);
+                });
+            } catch (err) {}
+        }
+
+        async function updateSchedules() {
+            try {
+                const response = await fetch('/api/schedules');
+                const schedules = await response.json();
+                const container = document.getElementById('clockwork-schedules');
+                
+                if (schedules.length === 0) {
+                    container.innerHTML = '<span style="font-size: 0.8rem; opacity: 0.5;">No active scheduled tasks.</span>';
+                    return;
+                }
+                
+                container.innerHTML = '';
+                schedules.forEach(task => {
+                    const card = document.createElement('div');
+                    card.style.background = 'rgba(255,255,255,0.05)';
+                    card.style.padding = '1rem';
+                    card.style.borderRadius = '12px';
+                    card.style.border = '1px solid var(--glass-border)';
+                    card.style.opacity = task.enabled ? '1' : '0.5';
+                    
+                    const lastRunFmt = task.lastRun ? new Date(task.lastRun).toLocaleString() : 'Never';
+                    
+                    card.innerHTML = `
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                            <strong style="color: #fbbf24;">${task.name}</strong>
+                            <span class="status-badge" style="border-color: #f59e0b; color: #f59e0b;">Every ${Math.round(task.intervalMs / 60000)}m</span>
+                        </div>
+                        <div style="font-size: 0.85rem; opacity: 0.8;">${task.description}</div>
+                        <div style="margin-top: 0.5rem; font-size: 0.75rem; color: #94a3b8; display: flex; justify-content: space-between;">
+                            <span>Status: ${task.enabled ? 'ACTIVE' : 'PAUSED'}</span>
+                            <span>Last Run: ${lastRunFmt}</span>
+                        </div>
+                    `;
+                    container.appendChild(card);
+                });
+            } catch (err) {}
+        }
+
+        async function updateKnowledge() {
+            try {
+                const response = await fetch('/api/knowledge');
+                const data = await response.json();
+                document.getElementById('knowledge-count').innerText = data.count;
+                
+                const container = document.getElementById('knowledge-manifest');
+                if (data.sources.length === 0) {
+                    container.innerHTML = '<span style="font-size: 0.8rem; opacity: 0.5;">No specialized knowledge ingested yet.</span>';
+                    return;
+                }
+                
+                container.innerHTML = '';
+                data.sources.forEach(src => {
+                    const badge = document.createElement('div');
+                    badge.className = 'status-badge';
+                    badge.style.padding = '0.3rem 0.8rem';
+                    badge.style.fontSize = '0.7rem';
+                    badge.style.borderColor = 'var(--success)';
+                    badge.innerText = '📖 ' + src;
+                    container.appendChild(badge);
+                });
+            } catch (err) {}
+        }
+
+        async function refreshMap() {
+            const diag = document.getElementById('architecture-diagram');
+            diag.innerHTML = 'Analyzing system architecture...';
+            try {
+                // We actually trigger the agent to visualize itself via the chat API or a direct status call
+                // For the demo hub, we'll use a hidden chat trigger
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: "Visualize your current architecture for the architect view." })
+                });
+                // The log update loop will pick up the mermaid result
+            } catch (err) {}
+        }
+
+        async function runSentinelAudit() {
+            const btn = document.getElementById('audit-btn');
+            const container = document.getElementById('audit-results');
+            btn.innerText = 'Auditing...';
+            btn.disabled = true;
+
+            try {
+                const response = await fetch('/api/audit');
+                const data = await response.json();
+                
+                document.getElementById('sentinel-score').innerText = `SENTINEL SCORE: ${data.score}%`;
+                container.innerHTML = '';
+                
+                data.checks.forEach(check => {
+                    const item = document.createElement('div');
+                    item.style.padding = '0.5rem';
+                    item.style.background = 'rgba(255,255,255,0.02)';
+                    item.style.borderRadius = '8px';
+                    item.style.fontSize = '0.75rem';
+                    item.style.borderLeft = `3px solid ${check.status === 'pass' ? 'var(--success)' : check.status === 'warn' ? 'var(--secondary)' : 'var(--error)'}`;
+                    item.innerHTML = `<strong>${check.name}</strong><br><span style="opacity: 0.7">${check.details}</span>`;
+                    container.appendChild(item);
+                });
+            } catch (err) {
+                console.error("Audit failed:", err);
+            } finally {
+                btn.innerText = 'Run Full Audit';
+                btn.disabled = false;
+            }
+        }
+
+        async function generateManual() {
+            const btn = document.getElementById('manual-btn');
+            btn.innerText = 'Synthesizing...';
+            btn.disabled = true;
+
+            try {
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: "Generate the complete system manual using the generate_project_manual tool." })
+                });
+                // The sandbox explorer will detect the file.
+                document.getElementById('manual-link').style.display = 'block';
+            } catch (err) {
+                console.error("Manual generation failed:", err);
+            } finally {
+                btn.innerText = 'Generate Manual';
+                btn.disabled = false;
+            }
+        }
+        async function updateLogs() {
+                const response = await fetch('/api/logs');
+                const logs = await response.json();
+                const container = document.getElementById('log-container');
+                const diagContainer = document.getElementById('architecture-diagram');
+                
+                // Keep only unique logs and clear old ones for demo
+                container.innerHTML = '';
+                logs.forEach(log => {
+                    const entry = document.createElement('div');
+                    entry.className = 'log-entry';
+                    entry.innerHTML = `<span class="log-time">[${log.time}]</span> <span>${log.message}</span>`;
+                    container.appendChild(entry);
+
+                    // Detect Mermaid diagram in logs
+                    if (log.message.includes("graph TD") || log.message.includes("graph LR")) {
+                        // Extract mermaid content
+                        const lines = log.message.split('\n');
+                        const mermaidCode = lines.filter(l => l.trim().startsWith('graph') || l.trim().startsWith('subgraph') || l.trim().includes('-->') || l.trim().includes('--')).join('\n');
+                        
+                        if (mermaidCode.trim()) {
+                            // Re-render mermaid
+                            diagContainer.removeAttribute('data-processed');
+                            diagContainer.innerHTML = mermaidCode;
+                            mermaid.render('mermaid-svg', mermaidCode).then(({ svg }) => {
+                                diagContainer.innerHTML = svg;
+                            });
+                        }
+                    }
+                });
+            } catch (err) {
+                console.error("Failed to fetch logs:", err);
+            }
+        }
+
+        // Setup Server-Sent Events (SSE) for Real-Time Telemetry
+        const sse = new EventSource('/api/stream');
+        
+        sse.addEventListener('log', () => {
+            updateLogs();
+        });
+
+        sse.addEventListener('status_update', () => {
+            updateStatus();
+        });
+
+        // Initialize display on load
+        updateStatus();
+        updateLogs();
+        loadPersonalities();
+    </script>
+</body>
+</html>

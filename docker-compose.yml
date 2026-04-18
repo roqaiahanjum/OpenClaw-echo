@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  open-claw-echo:
+    build: .
+    ports:
+      - "3005:3005"
+    env_file:
+      - .env
+    volumes:
+      - ./src/sandbox:/app/src/sandbox
+      - ./src/skills/dynamic:/app/src/skills/dynamic
+      - ./openclaw.db:/app/openclaw.db
+      - ./src/memory/semantic_core.json:/app/dist/memory/semantic_core.json
+    restart: unless-stopped

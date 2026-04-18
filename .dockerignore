@@ -1,0 +1,10 @@
+node_modules
+dist
+npm-debug.log
+.env
+.git
+src/sandbox/*
+src/skills/dynamic/*
+openclaw.db
+src/memory/semantic_core.json
+*.md
