@@ -4,8 +4,10 @@
   "description": "Local-first AI agent framework",
   "main": "dist/index.js",
   "scripts": {
+    "predev": "node scripts/kill-port.js",
     "dev": "nodemon --exec \"ts-node --transpile-only\" src/index.ts",
     "build": "echo Build complete - using ts-node transpile-only mode",
+    "prestart": "node scripts/kill-port.js",
     "start": "ts-node --transpile-only src/index.ts",
     "start:ts": "ts-node --transpile-only src/index.ts",
     "lint": "echo Lint skipped - ts-nocheck active on tools.ts",

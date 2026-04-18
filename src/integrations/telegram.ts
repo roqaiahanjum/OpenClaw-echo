@@ -376,22 +376,62 @@ app.post(WEBHOOK_PATH, async (req: Request, res: Response) => {
 // Start Server
 export const startServer = async () => {
     if (!process.env.TELEGRAM_TOKEN) {
+        console.error("[Fatal] TELEGRAM_TOKEN missing.");
         process.exit(1);
     }
 
     const mode = (process.env.TELEGRAM_MODE || "polling").toLowerCase();
+    
+    return new Promise((resolve, reject) => {
+        const server = app.listen(PORT, async () => {
+            DashboardLogger.log(`🚀 OPENCLAW ECHO: ${mode.toUpperCase()} MODE ACTIVATED`);
+            if (mode === "webhook") {
+                const WEBHOOK_URL = `${process.env.TELEGRAM_WEBHOOK_URL}${WEBHOOK_PATH}`;
+                try {
+                    await bot.telegram.setWebhook(WEBHOOK_URL);
+                    DashboardLogger.log("✅ Webhook registered.");
+                } catch (err: any) { }
+            } else {
+                bot.launch().catch(err => { });
+                DashboardLogger.log("✅ Polling active.");
+            }
+            resolve(server);
+        });
 
-    app.listen(PORT, async () => {
-        DashboardLogger.log(`🚀 OPENCLAW ECHO: ${mode.toUpperCase()} MODE ACTIVATED`);
-        if (mode === "webhook") {
-            const WEBHOOK_URL = `${process.env.TELEGRAM_WEBHOOK_URL}${WEBHOOK_PATH}`;
-            try {
-                await bot.telegram.setWebhook(WEBHOOK_URL);
-                DashboardLogger.log("✅ Webhook registered.");
-            } catch (err: any) { }
-        } else {
-            bot.launch().catch(err => { });
-            DashboardLogger.log("✅ Polling active.");
-        }
+        server.on('error', (err: any) => {
+            if (err.code === 'EADDRINUSE') {
+                const FALLBACK_PORT = PORT + 1;
+                if (FALLBACK_PORT <= 3006) {
+                    console.warn(`[System] Port ${PORT} busy. Retrying on ${FALLBACK_PORT}...`);
+                    app.listen(FALLBACK_PORT, () => {
+                        console.log(`🚀 OPENCLAW ECHO: FALLBACK MODE ACTIVATED ON PORT ${FALLBACK_PORT}`);
+                        bot.launch().catch(err => { });
+                        resolve(server);
+                    });
+                } else {
+                    console.error(`\n[Fatal] Port ${PORT} and ${FALLBACK_PORT} are both in use.`);
+                    console.error(`[Manual Fix] Run this PowerShell command to clear the port:`);
+                    console.error(`Stop-Process -Id (Get-NetTCPConnection -LocalPort ${PORT}).OwningProcess -Force\n`);
+                    process.exit(1);
+                }
+            } else {
+                reject(err);
+            }
+        });
     });
+};
+
+export const stopServer = async (server: any) => {
+    console.log("\n[System] Graceful shutdown initiated...");
+    try {
+        if (server) {
+            await new Promise((resolve) => server.close(resolve));
+            console.log("[System] Express server stopped.");
+        }
+        await bot.stop();
+        console.log("[System] Telegram bot stopped.");
+        await memory.close();
+    } catch (error: any) {
+        console.error("[System] Error during shutdown:", error.message);
+    }
 };

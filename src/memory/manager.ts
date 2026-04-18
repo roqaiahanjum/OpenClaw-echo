@@ -217,4 +217,18 @@ export class MemoryManager {
         }
         return health;
     }
+
+    async close() {
+        return new Promise<void>((resolve, reject) => {
+            this.db.close((err) => {
+                if (err) {
+                    console.error("[Memory] Error closing SQLite:", err.message);
+                    reject(err);
+                } else {
+                    console.log("[Memory] SQLite connection closed.");
+                    resolve();
+                }
+            });
+        });
+    }
 }

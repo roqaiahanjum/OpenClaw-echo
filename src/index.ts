@@ -24,8 +24,18 @@ async function bootstrap() {
         // 3. Dynamic Import: Loads the Telegram integration ONLY after environment is ready.
         // This solves constructor 'replace' errors and race conditions.
         console.log("[System] Environment verified. Loading services...");
-        const { startServer } = await import("./integrations/telegram");
-        await startServer();
+        const { startServer, stopServer } = await import("./integrations/telegram");
+        const server = await startServer();
+
+        // 4. Graceful Shutdown Configuration
+        const handleShutdown = async () => {
+            await stopServer(server);
+            process.exit(0);
+        };
+
+        process.on("SIGINT", handleShutdown);
+        process.on("SIGTERM", handleShutdown);
+
     } catch (error) {
         console.error("[Fatal] Failed to bootstrap OpenClaw Echo:", error);
         process.exit(1);
