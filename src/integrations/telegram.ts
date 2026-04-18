@@ -177,7 +177,16 @@ async function telegramHandler(ctx: Context) {
     if (isPhoto) {
         const photo = (ctx.message as any).photo[(ctx.message as any).photo.length - 1];
         const link = await ctx.telegram.getFileLink(photo.file_id);
-        photoLink = link.href;
+        try {
+            const { default: axios } = await import("axios");
+            const response = await axios.get(link.href, { responseType: 'arraybuffer' });
+            const base64 = Buffer.from(response.data, 'binary').toString('base64');
+            photoLink = `data:image/jpeg;base64,${base64}`;
+            DashboardLogger.log(`[Vision] Image securely downloaded and Base64 encoded for Gemini.`);
+        } catch(e) {
+            console.error("Failed to fetch image for Gemini:", e);
+            photoLink = link.href; // Fallback
+        }
     }
 
     await executeAutonomousFlow(
