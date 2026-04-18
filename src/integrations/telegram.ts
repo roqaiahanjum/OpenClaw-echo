@@ -34,15 +34,19 @@ let activePersonality: PersonalityMode = "standard";
 /**
  * THE ENGINE: A reusable 6-step autonomous flow.
  */
-async function executeAutonomousFlow(input: string, chatId: string, isPhoto: boolean, replyFn: (content: string) => Promise<any>, photoLink?: string) {
+async function executeAutonomousFlow(input: string, chatId: string, isPhoto: boolean, replyFn: (content: string) => Promise<any>, photoLink?: string, isRetry: boolean = false) {
     try {
         const persona = PERSONALITIES[activePersonality];
         DashboardLogger.log(`[Persona] Active: ${persona.label}`);
         DashboardLogger.log(`[Flow] Step 1: Processing interaction for ${chatId}`);
 
-        // 2. Context retrieval
-        DashboardLogger.log(`[Flow] Step 2: Retrieving context...`);
-        const context = await memory.getContext(input);
+        // 2. Context retrieval + Trimming (Requirement: max 1500 chars)
+        DashboardLogger.log(`[Flow] Step 2: Retrieving and trimming context...`);
+        let context = await memory.getContext(input);
+        if (context.length > 1500) {
+            context = context.slice(0, 1500) + "... [Truncated]";
+            DashboardLogger.log(`[System] Context trimmed for token safety.`);
+        }
 
         // 3. Model Invocation
         DashboardLogger.log(`[Flow] Step 3: Invoking ModelRouter...`);
@@ -62,7 +66,7 @@ async function executeAutonomousFlow(input: string, chatId: string, isPhoto: boo
             - Use tools if needed.
             - Check local knowledge base via 'read_sandbox_file' or 'user_profile.txt'.
             - If an image is provided, describe it or follow instructions.
-            - Context from history: 
+            - Context from history (trimmed): 
             ${context}`),
             new HumanMessage({ content: messageContent })
         ];
@@ -110,8 +114,32 @@ async function executeAutonomousFlow(input: string, chatId: string, isPhoto: boo
         Telemetry.broadcast("status_update", { event: "flow_complete" });
 
     } catch (error: any) {
-        DashboardLogger.log(`[Fatal] Flow Error: ${error.message}`);
-        await replyFn("System error in the autonomous flow. Please check logs.");
+        // Detailed terminal logging
+        console.error("[Fatal]", error.status || "N/A", error.message);
+        DashboardLogger.log(`[Fatal] Flow Error Logic: ${error.message}`);
+
+        const isRateLimit = error.message.includes("429") || error.status === 429 || error.message.toLowerCase().includes("too many requests");
+        const isTimeout = error.message.includes("503") || error.status === 503 || error.message.toLowerCase().includes("timeout");
+        
+        // Rate Limit Handling (Attempt retry once)
+        if (isRateLimit && !isRetry) {
+            DashboardLogger.log("[Status] Rate limit detected. Waiting 2s for retry...");
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            return executeAutonomousFlow(input, chatId, isPhoto, replyFn, photoLink, true);
+        }
+
+        // Specific user feedback
+        let userFeedback = `❌ Error: ${error.message}`;
+        
+        if (isRateLimit) {
+            userFeedback = "I'm thinking, please resend your message in a few seconds";
+        } else if (isTimeout) {
+            userFeedback = "Connection issue, please try again";
+        } else if (error.message.includes("tokens")) {
+            userFeedback = "⚠️ The message is too long for my current memory buffer.";
+        }
+        
+        await replyFn(userFeedback);
     }
 }
 
