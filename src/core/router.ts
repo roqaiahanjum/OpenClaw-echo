@@ -24,8 +24,8 @@ export class ModelRouter {
         try {
             this.cloudModel = new ChatGoogleGenerativeAI({
                 apiKey: process.env.GOOGLE_API_KEY,
-                model: "gemini-2.0-flash",
-                temperature: 0.7,
+                model: "gemini-2.0-flash-lite",
+                temperature: 0.7
             });
             console.log("[Router] 🟢 Google Gemini Bridge established.");
         } catch (error: any) {
@@ -84,5 +84,4 @@ export class ModelRouter {
                 details: "Ollama disabled in cloud mode."
             }
         };
-    }
-}
+
