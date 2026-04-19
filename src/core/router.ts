@@ -1,17 +1,23 @@
 // @ts-nocheck
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { ChatOllama } from "@langchain/ollama";
+import { HumanMessage } from "@langchain/core/messages";
 import * as dotenv from "dotenv";
 
 dotenv.config();
 
+/**
+ * ModelRouter: The Intelligence Switching Layer
+ * Optimized for Railway/Cloud: Features strict 15s timeouts and pre-invocation safety pings.
+ */
 export class ModelRouter {
     private static instance: ModelRouter;
     private cloudModel: any = null;
     private localModel: any = null;
+    private isGeminiVerified = false;
 
     private constructor() {
-        console.log("[Router] Service initialized (Lazy Mode). Waiting for query...");
+        console.log("[Router] Service initialized (Cloud-Native Mode).");
     }
 
     public static getInstance(): ModelRouter {
@@ -23,13 +29,13 @@ export class ModelRouter {
 
     private initializeGemini() {
         if (this.cloudModel) return;
-
         try {
             this.cloudModel = new ChatGoogleGenerativeAI({
                 apiKey: process.env.GOOGLE_API_KEY,
-                model: "gemini-2.0-flash", // Upgraded to latest supported flash model
+                model: "gemini-2.0-flash",
+                temperature: 0.7,
             });
-            console.log("[Router] 🟢 Google Gemini Bridge established (v1beta)!");
+            console.log("[Router] 🟢 Google Gemini Bridge established.");
         } catch (error: any) {
             console.error("[Router] Gemini Handshake Error:", error.message);
         }
@@ -48,79 +54,102 @@ export class ModelRouter {
         }
     }
 
-    // ✅ Accepts all 3 params telegram.ts passes
+    /**
+     * Safety Ping: Verifies connectivity and key validity in < 5s.
+     * Prevents long hangs on Railway when the API key is invalid or quota is dead.
+     */
+    private async verifyConnectivity(): Promise<boolean> {
+        if (this.isGeminiVerified) return true;
+        if (!this.cloudModel) return false;
+
+        try {
+            console.log("[Router] Verifying Gemini Safety Ping...");
+            await Promise.race([
+                this.cloudModel.invoke([new HumanMessage("ping")]),
+                new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error("Ping Timeout")), 5000)
+                )
+            ]);
+            this.isGeminiVerified = true;
+            return true;
+        } catch (error: any) {
+            const msg = error.message.toLowerCase();
+            if (msg.includes("api_key_invalid") || msg.includes("401") || msg.includes("403")) {
+                throw new Error("Invalid API Key: Please check your GOOGLE_API_KEY on Railway.");
+            }
+            if (msg.includes("quota") || msg.includes("429")) {
+                throw new Error("Quota Exceeded: Gemini API limit reached.");
+            }
+            throw new Error(`Connectivity Failed: ${error.message}`);
+        }
+    }
+
     async invoke(messages: any, logic?: string, options?: { tools?: any[] }) {
         this.initializeGemini();
         this.initializeOllama();
 
-        let retries = 2;
-        while (retries > 0) {
+        // 1. Safety Check (Pre-flight)
+        try {
+            await this.verifyConnectivity();
+        } catch (error: any) {
+            console.error(`[Router] Pre-flight Failed: ${error.message}`);
+            // Fallback immediately if pre-flight fails
+            if (this.localModel) {
+                console.log("[Router] Attempting immediate fallback to Ollama...");
+                return await this.localModel.invoke(messages);
+            }
+            throw error;
+        }
+
+        let retries = 1; // Reduced retries for faster cloud failover
+        while (retries >= 0) {
             try {
                 console.log("[Router] Routing query through Gemini...");
                 let model = this.cloudModel;
 
-                // Bind tools if provided and supported
                 if (options?.tools && options.tools.length > 0 && model?.bindTools) {
                     model = model.bindTools(options.tools);
                 }
 
                 if (!model) throw new Error("Gemini not initialized");
 
-                // ✅ 40s timeout for stability as per user preference
+                // ✅ Strict 15s timeout for Railway responsiveness
                 return await Promise.race([
                     model.invoke(messages),
                     new Promise((_, reject) =>
-                        setTimeout(() => reject(new Error("Gemini timeout after 40s")), 60000)
+                        setTimeout(() => reject(new Error("Gemini timeout after 15s")), 15000)
                     )
                 ]);
             } catch (error: any) {
-                const status = error.status || (error.response ? error.response.status : "N/A");
                 const msg = error.message || "Unknown error";
+                console.error(`[Router] Gemini Failure: ${msg}`);
 
-                console.error(`[Router] Gemini Failure | Status: ${status} | Message: ${msg}`);
+                const isQuota = msg.includes("429") || msg.toLowerCase().includes("quota");
+                const isAuth = msg.includes("401") || msg.includes("403") || msg.toLowerCase().includes("key");
 
-                // 1. Detect Hard Quota (Immediate Fallback)
-                const isHardQuota = msg.includes("429") && (msg.toLowerCase().includes("quota") || msg.toLowerCase().includes("limit"));
-
-                if (isHardQuota || status === 404 || msg.includes("404") || msg.includes("not found")) {
-                    console.error("[Router] ❌ Hard failure or Quota limit detected. Switching to fallback immediately.");
-                    retries = 0; // Skip Gemini retries
-                } else {
-                    const isRateLimit = msg.includes("429") || status === 429 || msg.toLowerCase().includes("too many requests");
-                    const isRetryable = isRateLimit || msg.includes("503") || status === 503;
-
-                    if (isRetryable && retries > 1) {
-                        console.log(`[Router] Retryable transient error (${status}). Retrying in 2s... (${retries - 1} left)`);
-                        await new Promise(r => setTimeout(r, 2000));
-                        retries--;
-                        continue;
-                    }
-                }
-
-                // 2. Fallback to Ollama if available
-                if (this.localModel) {
-                    try {
-                        console.log(`[Router] ⚠️ Falling back to Local Ollama due to ${status}: ${msg}`);
+                if (isQuota || isAuth || retries === 0) {
+                    if (this.localModel) {
+                        console.log(`[Router] ⚠️ Falling back to Local Ollama...`);
                         return await this.localModel.invoke(messages);
-                    } catch (localErr: any) {
-                        console.error("[Router] Local fallback failed too:", localErr.message);
                     }
+                    throw error;
                 }
 
-                throw error;
+                console.log(`[Router] Retrying Gemini... (${retries} left)`);
+                retries--;
+                await new Promise(r => setTimeout(r, 1000));
             }
         }
     }
 
-    // ✅ Critical for dashboard status icons
     async checkHealth() {
         if (!this.cloudModel) this.initializeGemini();
         if (!this.localModel) this.initializeOllama();
 
         return {
             gemini: {
-                status: this.cloudModel ? "connected" : "error",
-                details: this.cloudModel ? "Google Gemini Ready." : "Gemini initialization failed."
+                status: this.isGeminiVerified ? "connected" : "pending",
+                details: this.isGeminiVerified ? "Google Gemini Verified & Ready." : "Awaiting first handshake."
             },
             ollama: {
                 status: this.localModel ? "connected" : "offline",
