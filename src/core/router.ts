@@ -84,4 +84,4 @@ export class ModelRouter {
                 details: "Ollama disabled in cloud mode."
             }
         };
-
+    }
