@@ -236,6 +236,27 @@ export class MemoryManager {
         return health;
     }
 
+    /**
+     * ✅ Performs deep database maintenance (VACUUM + ANALYZE) 
+     * and refreshes the semantic vector bridge.
+     */
+    async optimize() {
+        console.log("[Memory] Deep maintenance initiated...");
+        await new Promise((resolve, reject) => {
+            this.db.serialize(() => {
+                this.db.run("VACUUM;");
+                this.db.run("ANALYZE;", (err) => {
+                    if (err) reject(err);
+                    else resolve();
+                });
+            });
+        });
+        
+        // Refresh vector store from disk
+        await this.initVectorStore();
+        console.log("[Memory] System-wide optimization complete.");
+    }
+
     async close() {
         return new Promise<void>((resolve, reject) => {
             this.db.close((err) => {

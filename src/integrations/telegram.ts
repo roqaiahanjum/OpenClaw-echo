@@ -291,17 +291,21 @@ app.post("/api/chat", async (req: Request, res: Response) => {
 
     let agentResponse = "";
     
-    await executeAutonomousFlow(
-        userMsg,
-        "WEB_INTERFACE",
-        false,
-        async (content) => { 
-            agentResponse = content;
-            DashboardLogger.log(`[WebChat Outbound] ${content}`);
-        }
-    );
-
-    res.json({ response: agentResponse });
+    try {
+        await executeAutonomousFlow(
+            userMsg,
+            "WEB_INTERFACE",
+            false,
+            async (content) => { 
+                agentResponse = content;
+                DashboardLogger.log(`[WebChat Outbound] ${content}`);
+            }
+        );
+        res.json({ response: agentResponse });
+    } catch (err: any) {
+        DashboardLogger.log(`[Fatal] WebChat Error: ${err.message}`);
+        res.status(500).json({ error: err.message || "Internal Server Error" });
+    }
 });
 
 app.get("/api/sandbox", async (req: Request, res: Response) => {
@@ -361,6 +365,34 @@ app.get("/api/audit", async (req: Request, res: Response) => {
     }
 });
 
+/**
+ * 🛠️ DEEP MAINTENANCE & UPDATE ENDPOINT
+ */
+app.post("/api/maintenance", async (req: Request, res: Response) => {
+    try {
+        DashboardLogger.log("[System] Deep maintenance cycle triggered via dashboard.");
+        
+        // 1. Optimize SQLite & Refresh Vector Store
+        await (memory as any).optimize();
+        
+        // 2. Synchronize Knowledge (Sandbox -> Memory)
+        const sandboxDir = path.resolve("src/sandbox");
+        const files = await fs.readdir(sandboxDir);
+        for (const file of files) {
+            if (file.endsWith(".txt") || file.endsWith(".md")) {
+                const content = await fs.readFile(path.join(sandboxDir, file), "utf-8");
+                await memory.ingestDocument(content, file);
+                DashboardLogger.log(`[Scholar] Refreshed knowledge from ${file}`);
+            }
+        }
+
+        res.json({ status: "success", detail: "Database optimized and knowledge base synchronized." });
+    } catch (err: any) {
+        console.error("[Fatal] Maintenance failed:", err.message);
+        res.status(500).json({ status: "error", message: err.message });
+    }
+});
+
 import { GoalManager } from "../core/goals";
 const globalOracle = new GoalManager();
 
@@ -396,6 +428,15 @@ Clockwork.setExecutor(async (prompt: string) => {
 
 // Boot all persisted schedules
 Clockwork.boot().catch(err => console.error("[Clockwork] Boot failed:", err));
+
+/**
+ * 🛡️ GLOBAL ERROR HANDLER
+ */
+app.use((err: any, req: Request, res: Response, next: any) => {
+    console.error("[Server Error]", err.stack);
+    DashboardLogger.log(`[System Error] ${err.message}`);
+    res.status(500).json({ error: "Internal Server Error", details: err.message });
+});
 
 /**
  * 🚀 TEST DRIVE ENDPOINT
