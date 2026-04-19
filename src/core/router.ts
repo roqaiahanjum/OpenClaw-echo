@@ -85,3 +85,4 @@ export class ModelRouter {
             }
         };
     }
+} // ✅ This closing brace was missing!
