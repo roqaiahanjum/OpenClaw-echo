@@ -158,19 +158,33 @@ OpenClaw Echo now features a breathtaking **React & Vite Frontend** designed wit
    ```
 3. Point your browser to **[http://localhost:5173](http://localhost:5173)** to enter the Live Diagnostic Hub.
 
+
 **Dashboard Features:**
 1. **Neural Connectivity Graph**: Real-time status of Gemini, Ollama, SQLite, and Vector Core visually mapped.
 2. **Sentinel Audit Engine**: Full system health check with live configuration alerts.
 3. **Live Sandbox Logs**: Server-Sent Events (SSE) stream the precise LangChain decision trees straight into your browser in real time!
 4. **Agent WebChat**: You can chat directly with your bot from the browser without needing a Telegram client.
 
-### 🖼️ Screenshots
-> *(Placeholder for UI Screenshots)*
-> 
-> *Screenshot 1: The Glassmorphism Neural React Dashboard*
-> *Screenshot 2: Streaming LangChain WebChat Execution*
-> *Screenshot 3: Terminal View showing zero-latency API failovers*
 
+### 🎭 Persona Deep-Dive
+| Persona | Technical Focus | Primary Toolset |
+| :--- | :--- | :--- |
+| **Elite Researcher** | High-entropy data synthesis | `cheerio`, `google-search` |
+| **System Architect** | Structural UML & Design Patterns | `mermaid.js`, `file-system` |
+| **Code Engineer** | Algorithmic efficiency & Debugging | `sandbox-exec`, `simple-git` |
+| **Neural Synthesis** | Cross-domain creative logic | `vector-rag`, `memory-vault` |
+
+
+## 🛡️ Sentinel Audit: The Integrity Layer
+The Sentinel Audit isn't just a dashboard button; it's a diagnostic middleware that:
+1. **Validates State:** Ensures the `ModelRouter` hasn't hung during a failover.
+2. **Prunes Context:** Automatically triggers a "trim" if the SQLite history exceeds the LLM's token window (preventing Error 400).
+3. **Security Handshake:** Checks if the `.env` variables are correctly loaded before allowing the agent to execute "Write" commands.
+
+## 💡 Design Decisions
+- **Why Hybrid?** To balance the high reasoning of Gemini with the 100% privacy and zero-cost of local Ollama models.
+- **Why Telegram?** To provide a zero-install mobile interface for an autonomous system.
+- **Why SQLite?** For a serverless, "Zero-Config" persistent memory that travels with the repository.
 ---
 
 ## ⚖️ License
