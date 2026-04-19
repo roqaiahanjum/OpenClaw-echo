@@ -13,6 +13,7 @@ export class ProjectAnalyzer {
         diagram += "  subgraph Core\n";
         diagram += "    R[ModelRouter] --> G[Gemini Engine]\n";
         diagram += "    L[Logger] --> D[Web Dashboard]\n";
+        diagram += "    C[Clockwork Scheduler] --> E[6-Step Flow Engine]\n";
         diagram += "  end\n\n";
 
         diagram += "  subgraph Integration\n";
@@ -100,6 +101,15 @@ export class ProjectAnalyzer {
             addCheck("Sandbox Isolation", "pass", "Isolated workspace active", 20);
         } catch {
             addCheck("Sandbox Isolation", "fail", "Sandbox directory inaccessible", 20);
+        }
+
+        // 4. Persistence & Schedules
+        try {
+            const schedPath = path.resolve("src", "sandbox", "schedules.json");
+            await fs.access(schedPath);
+            addCheck("Clockwork Pulse", "pass", "Autonomous schedules persistent", 10);
+        } catch {
+            addCheck("Clockwork Pulse", "warn", "No active background tasks", 10);
         }
 
         // Finalize

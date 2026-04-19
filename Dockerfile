@@ -1,19 +1,39 @@
-# OpenClaw Echo: Production Container
-# Uses ts-node --transpile-only to avoid high-memory tsc compilation
-FROM node:18-alpine
+# ============================================================
+# OpenClaw Echo: Multi-Stage Production Build
+# Stage 1: Build Dashboard  |  Stage 2: Production Runner
+# ============================================================
+
+# --- STAGE 1: BUILD THE DASHBOARD ---
+FROM node:20-alpine AS dashboard-builder
+WORKDIR /build
+
+COPY dashboard/package*.json ./
+RUN npm install
+
+COPY dashboard/ ./
+RUN npm run build
+
+
+# --- STAGE 2: PRODUCTION RUNNER ---
+FROM node:20-alpine
 WORKDIR /app
 
 # Install curl for healthchecks
 RUN apk add --no-cache curl
 
-# Install dependencies including devDependencies (needed for ts-node/typescript)
+# Install backend dependencies (includes devDeps for ts-node)
 COPY package*.json ./
 RUN npm install
 
-# Copy the full source
-COPY . .
+# Copy backend source
+COPY src/ ./src/
+COPY tsconfig.json ./
+COPY .env* ./
 
-# Ensure sandbox directory and dynamic skills exist
+# Copy compiled dashboard from Stage 1
+COPY --from=dashboard-builder /build/dist ./dashboard/dist
+
+# Ensure sandbox & dynamic skill directories exist
 RUN mkdir -p src/sandbox src/skills/dynamic
 
 EXPOSE 3005
@@ -21,4 +41,4 @@ EXPOSE 3005
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
   CMD curl -f http://localhost:3005/api/status || exit 1
 
-CMD ["npm", "start"]
+CMD ["npx", "ts-node", "--transpile-only", "src/index.ts"]

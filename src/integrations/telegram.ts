@@ -12,13 +12,9 @@ import { DashboardLogger } from "../core/logger";
 import { PERSONALITIES, PersonalityMode } from "../core/personalities";
 import { Telemetry } from "../core/telemetry";
 import { ProjectAnalyzer } from "../core/analyzer";
+import { Clockwork } from "../core/clockwork";
 
 dotenv.config();
-
-/**
- * OpenClaw Echo: Integrated Telegram Server
- * Supports: Vision, 6-Step Autonomous Flow, Webhook/Polling, Test-Drive, and Dynamic Personalities.
- */
 
 const bot = new Telegraf(process.env.TELEGRAM_TOKEN || "");
 const router = ModelRouter.getInstance();
@@ -26,40 +22,38 @@ const memory = MemoryManager.getInstance();
 const app = express();
 app.use(express.json());
 
+const dashboardPath = path.resolve("dashboard/dist");
+app.use(express.static(dashboardPath));
+
 const PORT = parseInt(process.env.PORT || "3005");
 const WEBHOOK_PATH = "/api/webhook";
 
-// State Management
 let activePersonality: PersonalityMode = "standard";
 
-/**
- * THE ENGINE: A reusable 6-step autonomous flow.
- */
 async function executeAutonomousFlow(input: string, chatId: string, isPhoto: boolean, replyFn: (content: string) => Promise<any>, photoLink?: string, isRetry: boolean = false) {
     try {
         const persona = PERSONALITIES[activePersonality];
         DashboardLogger.log(`[Persona] Active: ${persona.label}`);
         DashboardLogger.log(`[Flow] Step 1: Processing interaction for ${chatId}`);
 
-        // 2. Context retrieval + Trimming (Requirement: max 1500 chars)
         DashboardLogger.log(`[Flow] Step 2: Retrieving and trimming context...`);
         let context = "";
         try {
             context = await memory.getContext(input);
-            DashboardLogger.log(`[Flow] Step 2: Context retrieved successfully.`);
         } catch (e: any) {
-            DashboardLogger.log(`[Flow] Step 2: Context retrieval timed out or failed. Passing empty context.`);
             context = "No previous context available.";
         }
 
-        if (context.length > 1500) {
-            context = context.slice(0, 1500) + "... [Truncated]";
+        // ✅ Fix 2: Reduced to 500 chars for faster Railway response
+        if (context.length > 500) {
+            context = context.slice(0, 500) + "... [Truncated]";
             DashboardLogger.log(`[System] Context trimmed for token safety.`);
         }
 
-        // 3. Model Invocation
         DashboardLogger.log(`[Flow] Step 3: Invoking ModelRouter...`);
-        const tools = SkillRegistry.getTools();
+
+        // ✅ Fix 1: Tools disabled for faster response
+        const tools: any[] = [];
 
         let messageContent: any = input;
         if (isPhoto && photoLink) {
@@ -72,22 +66,19 @@ async function executeAutonomousFlow(input: string, chatId: string, isPhoto: boo
         let messages: any[] = [
             new SystemMessage(`${persona.prompt}
     Rules:
-    - Use tools if needed.
     - Keep responses SHORT and DIRECT — max 3-4 sentences.
     - Only answer what was asked, nothing extra.
     - Do NOT bring up unrelated topics from memory.
-    - Check local knowledge base via 'read_sandbox_file' or 'user_profile.txt'.
     - If an image is provided, describe it or follow instructions.
     - Context from history:
     ${context}`),
             new HumanMessage({ content: messageContent })
         ];
 
-        // 4. Autonomous Tool Execution Loop
         DashboardLogger.log(`[Flow] Step 4: Executing autonomous cycle...`);
         let finalResponse = "";
         let iterations = 0;
-        const MAX_ITERATIONS = 5;
+        const MAX_ITERATIONS = 3;
 
         while (iterations < MAX_ITERATIONS) {
             const logic = isPhoto ? "image_analysis" : "complex";
@@ -114,19 +105,15 @@ async function executeAutonomousFlow(input: string, chatId: string, isPhoto: boo
             }
         }
 
-        // 5. Reply
         DashboardLogger.log(`[Flow] Step 5: Replying...`);
         await replyFn(finalResponse);
 
-        // 6. Persistence
         DashboardLogger.log(`[Flow] Step 6: Persisting interaction...`);
         await memory.addInteraction(input, finalResponse);
 
-        // Broadcast to Dashboard to refresh state
         Telemetry.broadcast("status_update", { event: "flow_complete" });
 
     } catch (error: any) {
-        // Detailed terminal logging
         console.error("[Fatal]", error.status || "N/A", error.message);
         DashboardLogger.log(`[Fatal] Flow Error Logic: ${error.message}`);
 
@@ -135,33 +122,28 @@ async function executeAutonomousFlow(input: string, chatId: string, isPhoto: boo
         const isHardQuota = isRateLimit && (msg.toLowerCase().includes("quota") || msg.toLowerCase().includes("limit"));
         const isTimeout = msg.includes("503") || error.status === 503 || msg.toLowerCase().includes("timeout");
 
-        // Rate Limit Handling (Attempt retry once ONLY if not a hard quota)
         if (isRateLimit && !isRetry && !isHardQuota) {
             DashboardLogger.log("[Status] Transient rate limit detected. Waiting 2s for retry...");
             await new Promise(resolve => setTimeout(resolve, 2000));
             return executeAutonomousFlow(input, chatId, isPhoto, replyFn, photoLink, true);
         }
 
-        // Specific user feedback
         let userFeedback = `❌ Error: ${error.message}`;
 
         if (isHardQuota) {
-            userFeedback = "⚠️ Gemini Quota Exceeded. I attempted to use Ollama, but it seems there was an issue. Please ensure Ollama is running or try again later.";
+            userFeedback = "⚠️ Quota exceeded. Please try again later.";
         } else if (isRateLimit) {
-            userFeedback = "I'm thinking, please resend your message in a few seconds";
+            userFeedback = "I'm thinking, please resend your message in a few seconds.";
         } else if (isTimeout) {
-            userFeedback = "Connection issue, please try again";
-        } else if (error.message.includes("tokens")) {
-            userFeedback = "⚠️ The message is too long for my current memory buffer.";
+            userFeedback = "⏱️ Connection issue, please try again.";
+        } else if (msg.includes("tokens")) {
+            userFeedback = "⚠️ Message too long for my memory buffer.";
         }
 
         await replyFn(userFeedback);
     }
 }
 
-/**
- * Splits long text into chunks that fit within Telegram's character limit.
- */
 export function splitMessage(text: string, maxLength: number = 4000): string[] {
     const chunks: string[] = [];
     let current = text;
@@ -171,20 +153,16 @@ export function splitMessage(text: string, maxLength: number = 4000): string[] {
             break;
         }
         let splitIndex = current.lastIndexOf("\n", maxLength);
-        if (splitIndex <= 100) splitIndex = maxLength; // Fallback if no good newline found
+        if (splitIndex <= 100) splitIndex = maxLength;
         chunks.push(current.substring(0, splitIndex).trim());
         current = current.substring(splitIndex).trim();
     }
     return chunks;
 }
 
-/**
- * Telegram Adapter: Maps Telegraf context to the Engine.
- */
 async function telegramHandler(ctx: Context) {
     if (!ctx.message) return;
 
-    // @ts-ignore - telegraf filters handle this but TS doesn't see it
     const input = (ctx.message as any).text || (ctx.message as any).caption || "Analyze this image.";
     const isPhoto = !!(ctx.message as any).photo;
     let photoLink = undefined;
@@ -197,10 +175,8 @@ async function telegramHandler(ctx: Context) {
             const response = await axios.get(link.href, { responseType: 'arraybuffer' });
             const base64 = Buffer.from(response.data, 'binary').toString('base64');
             photoLink = `data:image/jpeg;base64,${base64}`;
-            DashboardLogger.log(`[Vision] Image securely downloaded and Base64 encoded for Gemini.`);
         } catch (e) {
-            console.error("Failed to fetch image for Gemini:", e);
-            photoLink = link.href; // Fallback
+            photoLink = link.href;
         }
     }
 
@@ -218,13 +194,12 @@ async function telegramHandler(ctx: Context) {
     );
 }
 
-// Handlers
 bot.command("start", (ctx) => ctx.reply("🚀 OpenClaw Echo is online and ready! Port: " + PORT));
 
 bot.command("clear", async (ctx) => {
     try {
         await memory.clearHistory();
-        await ctx.reply("🧹 Memory cleared! My context buffer has been completely reset. What's on your mind?");
+        await ctx.reply("🧹 Memory cleared! What's on your mind?");
         DashboardLogger.log(`[System] User requested memory clear.`);
     } catch (e) {
         await ctx.reply("❌ Error clearing memory.");
@@ -234,7 +209,6 @@ bot.command("clear", async (ctx) => {
 bot.on(message("text"), telegramHandler);
 bot.on(message("photo"), telegramHandler);
 
-// Express Routes
 app.get("/", async (req: Request, res: Response) => {
     try {
         const dashboardPath = path.join(__dirname, "dashboard.html");
@@ -291,9 +265,6 @@ app.get("/api/logs", (req: Request, res: Response) => {
     res.json(DashboardLogger.getLogs());
 });
 
-/**
- * 🌐 OMNICHANNEL CHAT ENDPOINT
- */
 app.post("/api/chat", async (req: Request, res: Response) => {
     const { message: userMsg } = req.body;
     if (!userMsg) return res.status(400).json({ error: "Missing message" });
@@ -314,7 +285,6 @@ app.post("/api/chat", async (req: Request, res: Response) => {
         );
         res.json({ response: agentResponse });
     } catch (err: any) {
-        DashboardLogger.log(`[Fatal] WebChat Error: ${err.message}`);
         res.status(500).json({ error: err.message || "Internal Server Error" });
     }
 });
@@ -333,12 +303,10 @@ app.get("/api/sandbox/raw", async (req: Request, res: Response) => {
     try {
         const fileName = req.query.file as string;
         if (!fileName) return res.status(400).send("No file specified");
-
         const filePath = path.join(path.resolve("src/sandbox"), fileName);
         if (!filePath.startsWith(path.resolve("src/sandbox"))) {
             return res.status(403).send("Forbidden");
         }
-
         res.sendFile(filePath);
     } catch (err) {
         res.status(404).send("Not found");
@@ -357,8 +325,6 @@ app.get("/api/knowledge", async (req: Request, res: Response) => {
                 timestamp: v.metadata.timestamp,
                 id: v.metadata.id
             }));
-
-        // Return unique sources
         const unique = Array.from(new Set(knowledgeItems.map((k: any) => k.source)));
         res.json({ count: knowledgeItems.length, sources: unique });
     } catch (err) {
@@ -375,17 +341,10 @@ app.get("/api/audit", async (req: Request, res: Response) => {
     }
 });
 
-/**
- * 🛠️ DEEP MAINTENANCE & UPDATE ENDPOINT
- */
 app.post("/api/maintenance", async (req: Request, res: Response) => {
     try {
         DashboardLogger.log("[System] Deep maintenance cycle triggered via dashboard.");
-
-        // 1. Optimize SQLite & Refresh Vector Store
         await (memory as any).optimize();
-
-        // 2. Synchronize Knowledge (Sandbox -> Memory)
         const sandboxDir = path.resolve("src/sandbox");
         const files = await fs.readdir(sandboxDir);
         for (const file of files) {
@@ -395,10 +354,8 @@ app.post("/api/maintenance", async (req: Request, res: Response) => {
                 DashboardLogger.log(`[Scholar] Refreshed knowledge from ${file}`);
             }
         }
-
-        res.json({ status: "success", detail: "Database optimized and knowledge base synchronized." });
+        res.json({ status: "success" });
     } catch (err: any) {
-        console.error("[Fatal] Maintenance failed:", err.message);
         res.status(500).json({ status: "error", message: err.message });
     }
 });
@@ -415,53 +372,54 @@ app.get("/api/goals", async (req: Request, res: Response) => {
     }
 });
 
-import { Clockwork } from "../core/clockwork";
-
 app.get("/api/schedules", async (req: Request, res: Response) => {
     try {
         const tasks = await Clockwork.listTasks();
-        res.json(tasks);
-    } catch (err) {
-        res.json([]);
+        res.json({ tasks });
+    } catch (e) { res.json({ tasks: [] }); }
+});
+
+app.post("/api/schedules", async (req: Request, res: Response) => {
+    try {
+        const { name, description, intervalMs, prompt } = req.body;
+        if (!name || !intervalMs || !prompt) {
+            return res.status(400).json({ error: "name, intervalMs, and prompt are required" });
+        }
+        const task = await Clockwork.createTask(name, description || "", intervalMs, prompt);
+        res.json({ task });
+    } catch (e: any) {
+        res.status(500).json({ error: e.message });
     }
 });
 
-// Wire Clockwork to the autonomous flow
-Clockwork.setExecutor(async (prompt: string) => {
-    await executeAutonomousFlow(
-        prompt,
-        "CLOCKWORK_SCHEDULER",
-        false,
-        async (content) => { DashboardLogger.log(`[Clockwork Result] ${content}`); }
-    );
+app.post("/api/schedules/:id/toggle", async (req: Request, res: Response) => {
+    try {
+        const { enabled } = req.body;
+        const task = await Clockwork.toggleTask(req.params.id, enabled);
+        res.json({ task });
+    } catch (e: any) {
+        res.status(500).json({ error: e.message });
+    }
 });
 
-// Boot all persisted schedules
-Clockwork.boot().catch(err => console.error("[Clockwork] Boot failed:", err));
-
-/**
- * 🛡️ GLOBAL ERROR HANDLER
- */
-app.use((err: any, req: Request, res: Response, next: any) => {
-    console.error("[Server Error]", err.stack);
-    DashboardLogger.log(`[System Error] ${err.message}`);
-    res.status(500).json({ error: "Internal Server Error", details: err.message });
+app.delete("/api/schedules/:id", async (req: Request, res: Response) => {
+    try {
+        const deleted = await Clockwork.deleteTask(req.params.id);
+        res.json({ success: deleted });
+    } catch (e: any) {
+        res.status(500).json({ error: e.message });
+    }
 });
 
-/**
- * 🚀 TEST DRIVE ENDPOINT
- */
 app.post("/api/test-drive", async (req: Request, res: Response) => {
     DashboardLogger.log("[TestDrive] Initiating autonomous simulation...");
     const simulatedChallenge = "Research the historical significance of Turing machines and save a brief note to sandbox as 'history.txt'";
-
     executeAutonomousFlow(
         simulatedChallenge,
         "VIRTUAL_DASHBOARD",
         false,
         async (content) => { DashboardLogger.log(`[TestDrive Response] ${content}`); }
     );
-
     res.json({ status: "initiated", challenge: simulatedChallenge });
 });
 
@@ -473,7 +431,17 @@ app.post(WEBHOOK_PATH, async (req: Request, res: Response) => {
     }
 });
 
-// Start Server
+app.use((err: any, req: Request, res: Response, next: any) => {
+    console.error("[Server Error]", err.stack);
+    res.status(500).json({ error: "Internal Server Error", details: err.message });
+});
+
+app.get("*", (req: Request, res: Response) => {
+    res.sendFile(path.join(dashboardPath, "index.html"), (err) => {
+        if (err) res.status(404).send("Dashboard not built.");
+    });
+});
+
 export const startServer = async () => {
     if (!process.env.TELEGRAM_TOKEN) {
         console.error("[Fatal] TELEGRAM_TOKEN missing.");
@@ -495,6 +463,18 @@ export const startServer = async () => {
                 bot.launch().catch(err => { });
                 DashboardLogger.log("✅ Polling active.");
             }
+
+            Clockwork.setExecutor(async (prompt: string) => {
+                await executeAutonomousFlow(
+                    prompt,
+                    "CLOCKWORK_SCHEDULER",
+                    false,
+                    async (content) => {
+                        DashboardLogger.log(`[Clockwork] Result: ${content.slice(0, 200)}`);
+                    }
+                );
+            });
+            await Clockwork.boot();
             resolve(server);
         });
 
@@ -504,14 +484,10 @@ export const startServer = async () => {
                 if (FALLBACK_PORT <= 3006) {
                     console.warn(`[System] Port ${PORT} busy. Retrying on ${FALLBACK_PORT}...`);
                     app.listen(FALLBACK_PORT, () => {
-                        console.log(`🚀 OPENCLAW ECHO: FALLBACK MODE ACTIVATED ON PORT ${FALLBACK_PORT}`);
                         bot.launch().catch(err => { });
                         resolve(server);
                     });
                 } else {
-                    console.error(`\n[Fatal] Port ${PORT} and ${FALLBACK_PORT} are both in use.`);
-                    console.error(`[Manual Fix] Run this PowerShell command to clear the port:`);
-                    console.error(`Stop-Process -Id (Get-NetTCPConnection -LocalPort ${PORT}).OwningProcess -Force\n`);
                     process.exit(1);
                 }
             } else {
@@ -522,14 +498,9 @@ export const startServer = async () => {
 };
 
 export const stopServer = async (server: any) => {
-    console.log("\n[System] Graceful shutdown initiated...");
     try {
-        if (server) {
-            await new Promise((resolve) => server.close(resolve));
-            console.log("[System] Express server stopped.");
-        }
+        if (server) await new Promise((resolve) => server.close(resolve));
         await bot.stop();
-        console.log("[System] Telegram bot stopped.");
         await memory.close();
     } catch (error: any) {
         console.error("[System] Error during shutdown:", error.message);

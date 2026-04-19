@@ -9,7 +9,7 @@
   "scripts": {
     "predev": "node scripts/kill-port.js",
     "dev": "nodemon --exec \"ts-node --transpile-only\" src/index.ts",
-    "build": "echo Build complete - using ts-node transpile-only mode",
+    "build": "cd dashboard && npm install && npm run build",
     "start": "ts-node --transpile-only src/index.ts",
     "start:ts": "ts-node --transpile-only src/index.ts",
     "lint": "echo Lint skipped - ts-nocheck active on tools.ts",

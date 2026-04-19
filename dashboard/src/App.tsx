@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useLayoutEffect } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import './App.css'
 import mermaid from 'mermaid'
 
@@ -60,8 +60,10 @@ function App() {
   const [auditData, setAuditData] = useState<{ score: number, checks: AuditCheck[] } | null>(null);
   const [auditLoading, setAuditLoading] = useState(false);
   const [personas, setPersonas] = useState<{ id: string, label: string }[]>([]);
-  const [activeTab, setActiveTab] = useState<'chat' | 'audit' | 'insights'>('chat');
+  const [activeTab, setActiveTab] = useState<'chat' | 'audit' | 'insights' | 'scheduler'>('chat');
   const [insightFiles, setInsightFiles] = useState<string[]>([]);
+  const [schedules, setSchedules] = useState<any[]>([]);
+  const [newSchedule, setNewSchedule] = useState({ name: '', prompt: '', intervalMin: '60' });
   const chatEndRef = useRef<HTMLDivElement>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
 
@@ -89,6 +91,14 @@ function App() {
       const res = await fetch('/api/sandbox');
       const data = await res.json();
       setInsightFiles(data.files || []);
+    } catch (err) {}
+  };
+
+  const fetchSchedules = async () => {
+    try {
+      const res = await fetch('/api/schedules');
+      const data = await res.json();
+      setSchedules(data.tasks || []);
     } catch (err) {}
   };
 
@@ -263,10 +273,10 @@ function App() {
 
         {/* Bottom Panels */}
         <div className="glass-panel col-span-8" style={{ display: 'flex', flexDirection: 'column', minHeight: '480px' }}>
-          <div style={{ display: 'flex', gap: '1.5rem', marginBottom: '1.5rem', borderBottom: '1px solid var(--glass-border)', paddingBottom: '1rem' }}>
-            {(['chat', 'audit', 'insights'] as const).map(tab => (
-              <button key={tab} onClick={() => { setActiveTab(tab); if (tab === 'insights') fetchInsights(); }} style={{ background: 'none', border: 'none', color: activeTab === tab ? 'var(--primary)' : 'var(--text-secondary)', cursor: 'pointer', fontSize: '0.95rem', fontWeight: 700, position: 'relative', padding: '0.5rem 0' }}>
-                {tab === 'chat' ? '⚡ REAL-TIME CHAT' : tab === 'audit' ? '🛡️ AUDIT REPORT' : '📊 INSIGHTS GALLERY'}
+          <div style={{ display: 'flex', gap: '1.5rem', marginBottom: '1.5rem', borderBottom: '1px solid var(--glass-border)', paddingBottom: '1rem', flexWrap: 'wrap' }}>
+            {(['chat', 'audit', 'insights', 'scheduler'] as const).map(tab => (
+              <button key={tab} onClick={() => { setActiveTab(tab); if (tab === 'insights') fetchInsights(); if (tab === 'scheduler') fetchSchedules(); }} style={{ background: 'none', border: 'none', color: activeTab === tab ? 'var(--primary)' : 'var(--text-secondary)', cursor: 'pointer', fontSize: '0.95rem', fontWeight: 700, position: 'relative', padding: '0.5rem 0' }}>
+                {tab === 'chat' ? '⚡ CHAT' : tab === 'audit' ? '🛡️ AUDIT' : tab === 'insights' ? '📊 INSIGHTS' : '⏰ SCHEDULER'}
                 {activeTab === tab && <div style={{ position: 'absolute', bottom: '-1px', left: 0, right: 0, height: '2px', background: 'var(--primary)', boxShadow: '0 0 10px var(--primary)' }} />}
               </button>
             ))}
@@ -354,6 +364,50 @@ function App() {
                 ))}
                 {insightFiles.length === 0 && <div style={{ textAlign: 'center', gridColumn: '1/-1', padding: '4rem', opacity: 0.5 }}>No insights generated yet. Ask me to create a chart!</div>}
               </div>
+            </div>
+          )}
+
+          {activeTab === 'scheduler' && (
+            <div style={{ flex: 1, overflowY: 'auto', padding: '0.5rem' }}>
+              <div className="glass-panel" style={{ padding: '1.5rem', marginBottom: '1.5rem' }}>
+                <h4 style={{ marginBottom: '1rem', fontWeight: 600 }}>Create Scheduled Task</h4>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.8rem', marginBottom: '1rem' }}>
+                  <input placeholder="Task Name" value={newSchedule.name} onChange={e => setNewSchedule(p => ({ ...p, name: e.target.value }))} style={{ padding: '0.8rem', borderRadius: '10px', border: '1px solid var(--glass-border)', background: 'rgba(255,255,255,0.03)', color: 'white', outline: 'none' }} />
+                  <input placeholder="Interval (minutes)" type="number" value={newSchedule.intervalMin} onChange={e => setNewSchedule(p => ({ ...p, intervalMin: e.target.value }))} style={{ padding: '0.8rem', borderRadius: '10px', border: '1px solid var(--glass-border)', background: 'rgba(255,255,255,0.03)', color: 'white', outline: 'none' }} />
+                </div>
+                <input placeholder="AI Prompt (what should the agent do?)" value={newSchedule.prompt} onChange={e => setNewSchedule(p => ({ ...p, prompt: e.target.value }))} style={{ width: '100%', padding: '0.8rem', borderRadius: '10px', border: '1px solid var(--glass-border)', background: 'rgba(255,255,255,0.03)', color: 'white', outline: 'none', marginBottom: '1rem' }} />
+                <button onClick={async () => {
+                  if (!newSchedule.name || !newSchedule.prompt) return;
+                  await fetch('/api/schedules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: newSchedule.name, prompt: newSchedule.prompt, intervalMs: parseInt(newSchedule.intervalMin) * 60000, description: '' }) });
+                  setNewSchedule({ name: '', prompt: '', intervalMin: '60' });
+                  fetchSchedules();
+                }} style={{ padding: '0.8rem 2rem', borderRadius: '12px', border: 'none', background: 'linear-gradient(135deg, #38bdf8, #818cf8)', color: 'white', fontWeight: 700, cursor: 'pointer' }}>
+                  ➕ Schedule Task
+                </button>
+              </div>
+              {schedules.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '3rem', opacity: 0.5 }}>⏰ No scheduled tasks yet.</div>
+              ) : (
+                <div style={{ display: 'grid', gap: '1rem' }}>
+                  {schedules.map((task: any) => (
+                    <div key={task.id} className="glass-panel" style={{ padding: '1.2rem', borderLeft: `4px solid ${task.enabled ? 'var(--success)' : 'var(--text-secondary)'}`, borderRadius: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <strong>{task.name}</strong>
+                        <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.3rem' }}>Every {Math.round(task.intervalMs / 60000)} min • {task.enabled ? '🟢 Active' : '⚪ Paused'}</div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.2rem', opacity: 0.7 }}>{task.prompt.slice(0, 80)}...</div>
+                      </div>
+                      <div style={{ display: 'flex', gap: '0.5rem' }}>
+                        <button onClick={async () => { await fetch(`/api/schedules/${task.id}/toggle`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: !task.enabled }) }); fetchSchedules(); }} style={{ padding: '0.5rem 1rem', borderRadius: '8px', border: '1px solid var(--glass-border)', background: 'rgba(255,255,255,0.03)', color: 'white', cursor: 'pointer', fontSize: '0.8rem' }}>
+                          {task.enabled ? '⏸ Pause' : '▶ Resume'}
+                        </button>
+                        <button onClick={async () => { await fetch(`/api/schedules/${task.id}`, { method: 'DELETE' }); fetchSchedules(); }} style={{ padding: '0.5rem 1rem', borderRadius: '8px', border: '1px solid var(--error)', background: 'rgba(244,63,94,0.1)', color: 'var(--error)', cursor: 'pointer', fontSize: '0.8rem' }}>
+                          🗑
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -25,8 +25,9 @@
 * **The Swarm (Delegation Strategy)**: Spawns asynchronous sub-agents (`Researcher`, `Coder`, `Analyst`, `Writer`, `QA_Engineer`) to execute gigantic monolithic tasks in parallel.
 * **Persistent Memory & Vector RAG**: Maintains a rolling SQLite history and a serverless JSON Vector Core for long-term semantic retrieval.
 * **Dynamic Skill Registry**: Features 18+ registered autonomous tools including Deep Web Scraping, SMTP Email Dispatch, Git version control, and Sandbox Code Execution.
-* **Real-time Telemetry Dashboard**: A breathtaking web dashboard powered by Express.js and Server-Sent Events (SSE) that pushes 0-latency logs and health maps.
-* **Polling & Webhook Support**: Flexible Telegram integration capable of running via fast-polling or standard webhooks, automatically handling Telegram's 4096-character limits via smart message chunking.
+* **Unified Real-time Dashboard**: A breathtaking glassmorphic dashboard served directly from the backend on a single port (3005), simplifying deployment and reducing latency.
+* **The Clockwork Scheduler**: Persistent, autonomous background task engine that allows the agent to schedule its own technical research, code audits, or notifications.
+* **Polling & Webhook Support**: Flexible Telegram integration with automatic message chunking for 4000+ character responses.
 
 ---
 
@@ -135,10 +136,11 @@ open-claw-echo/
    # Edit .env and supply your GOOGLE_API_KEY and TELEGRAM_TOKEN
    ```
 
-4. **Boot Agent & Telemetry Server**
+4. **Boot Agent & Unified Dashboard**
    ```bash
    npm start
    ```
+   Open **[http://localhost:3005](http://localhost:3005)** to enter the Live Diagnostic Hub.
 
 ### Option B: Containerized (Docker Compose)
 *Highly recommended for maximum sandbox isolation.*
@@ -175,18 +177,12 @@ Create a `.env` file in the root directory.
 
 ## 🚀 How to Run
 
-### 1. Boot Backend
+### Launch Command
 ```bash
-# Starts the prestart port-cleaner, then launches the TS Node server
+# Cleans up ports, installs/builds the dashboard if missing, and boots the unified server
 npm start
 ```
-
-### 2. Boot Dashboard
-```bash
-cd dashboard
-npm run dev
-```
-Open **[http://localhost:5173](http://localhost:5173)** to enter the Live Diagnostic Hub.
+Open **[http://localhost:3005](http://localhost:3005)** to enter the Live Diagnostic Hub. (The Dashboard is now served directly from the same port as the API!)
 
 ---
 

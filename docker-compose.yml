@@ -16,7 +16,7 @@ services:
       timeout: 10s
       retries: 3
 
-  # ── OpenClaw Echo (Main Agent) ────────────────────
+  # ── OpenClaw Echo (Main Agent + Dashboard) ────────
   open-claw-echo:
     build: .
     container_name: openclaw-echo
@@ -26,7 +26,7 @@ services:
       - .env
     environment:
       - OLLAMA_BASE_URL=http://ollama:11434
-      - OLLAMA_MODEL=llama3
+      - OLLAMA_MODEL=llama3:latest
     volumes:
       - ./src/sandbox:/app/src/sandbox
       - ./src/skills/dynamic:/app/src/skills/dynamic

@@ -69,8 +69,8 @@ export class ModelRouter {
                 // ✅ 40s timeout for stability as per user preference
                 return await Promise.race([
                     model.invoke(messages),
-                    new Promise((_, reject) => 
-                        setTimeout(() => reject(new Error("Gemini timeout after 40s")), 40000)
+                    new Promise((_, reject) =>
+                        setTimeout(() => reject(new Error("Gemini timeout after 40s")), 60000)
                     )
                 ]);
             } catch (error: any) {

@@ -1,10 +1,13 @@
 node_modules
-dist
 npm-debug.log
-.env
 .git
+*.md
+
+# Sandbox data (persisted via volumes, not baked into image)
 src/sandbox/*
 src/skills/dynamic/*
 openclaw.db
 src/memory/semantic_core.json
-*.md
+
+# Dashboard node_modules (rebuilt in Stage 1)
+dashboard/node_modules
