@@ -41,6 +41,58 @@
 
 ---
 
+## 🏗️ Neural Architecture
+
+```mermaid
+graph TD
+    subgraph "External Layers"
+        T[Telegram API]
+        WEB[Glassmorphism Dashboard]
+    end
+
+    subgraph "The Brain (Core)"
+        R[ModelRouter]
+        R --> G[Google Gemini v1beta]
+        R --> O[Local Ollama]
+        E[Autonomous Flow Engine]
+    end
+
+    subgraph "The Vault (Memory)"
+        SQL[(SQLite History)]
+        VEC[(Vector Core RAG)]
+    end
+
+    subgraph "The Swarm (Skills)"
+        S1[Researcher]
+        S2[Coder]
+        S3[Analyst]
+        S4[Engineer]
+    end
+
+    T <--> E
+    WEB <--> E
+    E <--> R
+    E <--> SQL
+    E <--> VEC
+    E <--> S1
+    E <--> S2
+```
+
+---
+
+## 🔄 The 6-Step Autonomous Cycle
+
+Every interaction with OpenClaw Echo triggers a sophisticated neural cycle:
+
+1.  **Ingestion:** Extracts raw text, images, or metadata from Telegram/Web.
+2.  **Synthesis:** Retrieves semantic context from Vector Core and recent history from SQLite.
+3.  **Routing:** Calculates the optimal model (Gemini vs Ollama) based on task complexity and quota limits.
+4.  **Devolve:** Spawns specialized sub-agents from **The Swarm** to handle specific technical sub-tasks.
+5.  **Execution:** Invokes 18+ registered tools (Sandbox, Git, Web, Email) in a recursive loop.
+6.  **Persistence:** Summarizes the interaction, updates the user profile, and commits to long-term memory.
+
+---
+
 ## 🏗️ Project Structure
 
 ```text
@@ -123,14 +175,18 @@ Create a `.env` file in the root directory.
 
 ## 🚀 How to Run
 
+### 1. Boot Backend
 ```bash
 # Starts the prestart port-cleaner, then launches the TS Node server
 npm start
-
-# OR via Docker:
-docker-compose up
 ```
-Once booted, the agent checks the environment. By default, it will start completely autonomously in **Polling Mode** and connect directly to your Telegram bot. Concurrently, it exposes the command-center REST API.
+
+### 2. Boot Dashboard
+```bash
+cd dashboard
+npm run dev
+```
+Open **[http://localhost:5173](http://localhost:5173)** to enter the Live Diagnostic Hub.
 
 ---
 
@@ -146,34 +202,16 @@ Once booted, the agent checks the environment. By default, it will start complet
 
 ---
 
-## 📡 Live Telemetry Command Center
+## 🎭 Persona Deep-Dive
 
-OpenClaw Echo now features a breathtaking **React & Vite Frontend** designed with ultra-modern Glassmorphism.
+| Persona | Technical Focus | Primary Toolset | Rationale |
+| :--- | :--- | :--- | :--- |
+| **Elite Researcher** | High-entropy data synthesis | `cheerio`, `google-search` | Designed for deep web analysis and fact-checking. |
+| **System Architect** | Structural UML & Design | `mermaid.js`, `file-system` | Focuses on codebase visualization and architecture. |
+| **Code Engineer** | Efficiency & Debugging | `sandbox-exec`, `simple-git` | Specialized in writing, testing, and committing code. |
+| **Neural Synthesis** | Cross-domain creative logic | `vector-rag`, `memory-vault` | Best for semantic retrieval and context stitching. |
 
-1. Ensure the Node backend is running (`npm start` in the root).
-2. Open a new terminal and run the dashboard:
-   ```bash
-   cd dashboard
-   npm run dev
-   ```
-3. Point your browser to **[http://localhost:5173](http://localhost:5173)** to enter the Live Diagnostic Hub.
-
-
-**Dashboard Features:**
-1. **Neural Connectivity Graph**: Real-time status of Gemini, Ollama, SQLite, and Vector Core visually mapped.
-2. **Sentinel Audit Engine**: Full system health check with live configuration alerts.
-3. **Live Sandbox Logs**: Server-Sent Events (SSE) stream the precise LangChain decision trees straight into your browser in real time!
-4. **Agent WebChat**: You can chat directly with your bot from the browser without needing a Telegram client.
-
-
-### 🎭 Persona Deep-Dive
-| Persona | Technical Focus | Primary Toolset |
-| :--- | :--- | :--- |
-| **Elite Researcher** | High-entropy data synthesis | `cheerio`, `google-search` |
-| **System Architect** | Structural UML & Design Patterns | `mermaid.js`, `file-system` |
-| **Code Engineer** | Algorithmic efficiency & Debugging | `sandbox-exec`, `simple-git` |
-| **Neural Synthesis** | Cross-domain creative logic | `vector-rag`, `memory-vault` |
-
+---
 
 ## 🛡️ Sentinel Audit: The Integrity Layer
 The Sentinel Audit isn't just a dashboard button; it's a diagnostic middleware that:

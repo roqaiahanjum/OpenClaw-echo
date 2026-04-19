@@ -119,12 +119,14 @@ async function executeAutonomousFlow(input: string, chatId: string, isPhoto: boo
         console.error("[Fatal]", error.status || "N/A", error.message);
         DashboardLogger.log(`[Fatal] Flow Error Logic: ${error.message}`);
 
-        const isRateLimit = error.message.includes("429") || error.status === 429 || error.message.toLowerCase().includes("too many requests");
-        const isTimeout = error.message.includes("503") || error.status === 503 || error.message.toLowerCase().includes("timeout");
+        const msg = error.message || "";
+        const isRateLimit = msg.includes("429") || error.status === 429 || msg.toLowerCase().includes("too many requests");
+        const isHardQuota = isRateLimit && (msg.toLowerCase().includes("quota") || msg.toLowerCase().includes("limit"));
+        const isTimeout = msg.includes("503") || error.status === 503 || msg.toLowerCase().includes("timeout");
         
-        // Rate Limit Handling (Attempt retry once)
-        if (isRateLimit && !isRetry) {
-            DashboardLogger.log("[Status] Rate limit detected. Waiting 2s for retry...");
+        // Rate Limit Handling (Attempt retry once ONLY if not a hard quota)
+        if (isRateLimit && !isRetry && !isHardQuota) {
+            DashboardLogger.log("[Status] Transient rate limit detected. Waiting 2s for retry...");
             await new Promise(resolve => setTimeout(resolve, 2000));
             return executeAutonomousFlow(input, chatId, isPhoto, replyFn, photoLink, true);
         }
@@ -132,7 +134,9 @@ async function executeAutonomousFlow(input: string, chatId: string, isPhoto: boo
         // Specific user feedback
         let userFeedback = `❌ Error: ${error.message}`;
         
-        if (isRateLimit) {
+        if (isHardQuota) {
+            userFeedback = "⚠️ Gemini Quota Exceeded. I attempted to use Ollama, but it seems there was an issue. Please ensure Ollama is running or try again later.";
+        } else if (isRateLimit) {
             userFeedback = "I'm thinking, please resend your message in a few seconds";
         } else if (isTimeout) {
             userFeedback = "Connection issue, please try again";
@@ -147,7 +151,7 @@ async function executeAutonomousFlow(input: string, chatId: string, isPhoto: boo
 /**
  * Splits long text into chunks that fit within Telegram's character limit.
  */
-function splitMessage(text: string, maxLength: number = 4000): string[] {
+export function splitMessage(text: string, maxLength: number = 4000): string[] {
     const chunks: string[] = [];
     let current = text;
     while (current.length > 0) {

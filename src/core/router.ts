@@ -19,7 +19,7 @@ export class ModelRouter {
         try {
             this.cloudModel = new ChatGoogleGenerativeAI({
                 apiKey: process.env.GOOGLE_API_KEY,
-                model: "gemini-2.5-flash", // Upgraded to latest supported flash model
+                model: "gemini-2.0-flash-lite", // Upgraded to latest supported flash model
             });
             console.log("[Router] 🟢 Google Gemini Bridge established (v1beta)!");
         } catch (error: any) {
@@ -44,13 +44,13 @@ export class ModelRouter {
     async invoke(messages: any, logic?: string, options?: { tools?: any[] }) {
         this.initializeGemini();
         this.initializeOllama();
-        
+
         let retries = 2;
         while (retries > 0) {
             try {
                 console.log("[Router] Routing query through Gemini...");
                 let model = this.cloudModel;
-                
+
                 // Bind tools if provided and supported
                 if (options?.tools && options.tools.length > 0 && model?.bindTools) {
                     model = model.bindTools(options.tools);
@@ -61,26 +61,28 @@ export class ModelRouter {
             } catch (error: any) {
                 const status = error.status || (error.response ? error.response.status : "N/A");
                 const msg = error.message || "Unknown error";
-                
+
                 console.error(`[Router] Gemini Failure | Status: ${status} | Message: ${msg}`);
-                
-                // Specialized handling for 404 (Model Not Found) - don't retry, fallback immediately
-                if (status === 404 || msg.includes("404") || msg.includes("not found")) {
-                    console.error("[Router] ❌ Model configuration error detected (404). Switching to fallback.");
-                    retries = 0; // Skip retries
+
+                // 1. Detect Hard Quota (Immediate Fallback)
+                const isHardQuota = msg.includes("429") && (msg.toLowerCase().includes("quota") || msg.toLowerCase().includes("limit"));
+
+                if (isHardQuota || status === 404 || msg.includes("404") || msg.includes("not found")) {
+                    console.error("[Router] ❌ Hard failure or Quota limit detected. Switching to fallback immediately.");
+                    retries = 0; // Skip Gemini retries
                 } else {
                     const isRateLimit = msg.includes("429") || status === 429 || msg.toLowerCase().includes("too many requests");
                     const isRetryable = isRateLimit || msg.includes("503") || status === 503;
-                    
+
                     if (isRetryable && retries > 1) {
-                        console.log(`[Router] Retryable error hit (${status}). Retrying in 5s... (${retries - 1} left)`);
-                        await new Promise(r => setTimeout(r, 5000));
+                        console.log(`[Router] Retryable transient error (${status}). Retrying in 2s... (${retries - 1} left)`);
+                        await new Promise(r => setTimeout(r, 2000));
                         retries--;
                         continue;
                     }
                 }
 
-                // Fallback to Ollama if available
+                // 2. Fallback to Ollama if available
                 if (this.localModel) {
                     try {
                         console.log(`[Router] ⚠️ Falling back to Local Ollama due to ${status}: ${msg}`);

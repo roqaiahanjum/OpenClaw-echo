@@ -136,37 +136,53 @@ function App() {
     setAuditLoading(false);
   };
 
+  const getLogClass = (content: string) => {
+    const msg = content.toLowerCase();
+    if (msg.includes('[system]')) return 'log-system';
+    if (msg.includes('[flow]')) return 'log-flow';
+    if (msg.includes('[memory]')) return 'log-memory';
+    if (msg.includes('[fatal]') || msg.includes('error')) return 'log-error';
+    if (msg.includes('[status]') || msg.includes('[testdrive]')) return 'log-flow';
+    if (msg.includes('warning') || msg.includes('⚠️')) return 'log-warn';
+    return '';
+  };
+
   const NeuralNode = ({ name, data, icon }: { name: string, data?: { status: string, details: string }, icon: string }) => {
     const isConnected = data?.status === 'connected';
     return (
-      <div style={{ textAlign: 'center', padding: '1.5rem', background: isConnected ? 'linear-gradient(135deg, rgba(56,189,248,0.1), rgba(129,140,248,0.1))' : 'rgba(255,255,255,0.02)', borderRadius: '16px', border: isConnected ? '1px solid rgba(56,189,248,0.3)' : '1px solid rgba(255,255,255,0.1)', transition: 'all 0.3s' }}>
-        <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>{icon}</div>
-        <strong style={{ display: 'block', marginBottom: '0.2rem' }}>{name}</strong>
-        <span style={{ fontSize: '0.75rem', opacity: 0.6 }}>{data?.details || 'Checking...'}</span>
+      <div className="glass-panel" style={{ textAlign: 'center', padding: '1.5rem', background: isConnected ? 'rgba(56,189,248,0.05)' : 'rgba(255,255,255,0.01)', border: isConnected ? '1px solid rgba(56,189,248,0.3)' : '1px solid rgba(255,255,255,0.1)' }}>
+        <div style={{ fontSize: '2rem', marginBottom: '0.8rem', filter: isConnected ? 'drop-shadow(0 0 10px rgba(56,189,248,0.5))' : 'grayscale(1)' }}>{icon}</div>
+        <strong style={{ display: 'block', marginBottom: '0.3rem', fontSize: '0.9rem' }}>{name}</strong>
+        <div style={{ fontSize: '0.7rem', opacity: isConnected ? 0.9 : 0.5, color: isConnected ? 'var(--primary)' : 'var(--text-secondary)' }}>
+          {isConnected ? '● ACTIVE' : '○ OFFLINE'}
+        </div>
       </div>
     );
   };
 
-  const auditColor = (s: string) => s === 'pass' ? 'var(--success)' : s === 'warn' ? 'var(--secondary)' : 'var(--error)';
+  const auditColor = (s: string) => s === 'pass' ? 'var(--success)' : s === 'warn' ? 'var(--warn)' : 'var(--error)';
 
   return (
     <>
       <div className="orb orb-1" />
       <div className="orb orb-2" />
 
-      <header style={{ padding: '1.5rem 2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', maxWidth: '1400px', margin: '0 auto' }}>
-        <div style={{ fontSize: '1.5rem', fontWeight: 600, background: 'linear-gradient(to right, #38bdf8, #c084fc)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
-          OPENCLAW ECHO
+      <header style={{ padding: '2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', maxWidth: '1440px', margin: '0 auto' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.8rem' }}>
+          <div style={{ width: '32px', height: '32px', background: 'linear-gradient(135deg, #38bdf8, #818cf8)', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>Ω</div>
+          <div style={{ fontSize: '1.4rem', fontWeight: 800, letterSpacing: '-0.5px', background: 'linear-gradient(to right, #f8fafc, #94a3b8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+            OPENCLAW <span style={{ color: 'var(--primary)', WebkitTextFillColor: 'var(--primary)' }}>ECHO</span>
+          </div>
         </div>
         <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
           {auditData && (
-            <div className="status-badge" style={{ borderColor: 'var(--secondary)', color: 'var(--secondary)' }}>
-              SENTINEL: {auditData.score}%
+            <div className="status-badge" style={{ borderColor: auditData.score > 80 ? 'var(--success)' : 'var(--warn)', color: auditData.score > 80 ? 'var(--success)' : 'var(--warn)' }}>
+              CORE INTEGRITY: {auditData.score}%
             </div>
           )}
           <div className="status-badge" style={{ borderColor: error ? 'var(--error)' : 'var(--success)', color: error ? 'var(--error)' : 'white' }}>
             {!error && <div className="pulse" />}
-            {error ? 'SYSTEM DOWN' : 'SYSTEM OPERATIONAL'}
+            {error ? 'SENTINEL ALERT' : 'ACTIVE'}
           </div>
         </div>
       </header>
@@ -174,126 +190,131 @@ function App() {
       <main className="dashboard-grid">
         {/* Neural Connectivity */}
         <div className="glass-panel col-span-8">
-          <h3 className="text-indigo">Neural Connectivity</h3>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem' }}>
-            <NeuralNode name="Google Gemini" icon="🤖" data={status?.router?.gemini} />
-            <NeuralNode name="SQLite DB" icon="💾" data={status?.memory?.sqlite} />
-            <NeuralNode name="Vector Core" icon="🌀" data={status?.memory?.chroma} />
-            <NeuralNode name="Ollama Edge" icon="🦙" data={status?.router?.ollama} />
+          <h3>Neural Connectivity</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1.2rem' }}>
+            <NeuralNode name="Cloud Brain" icon="🧠" data={status?.router?.gemini} />
+            <NeuralNode name="Memory Vault" icon="🔒" data={status?.memory?.sqlite} />
+            <NeuralNode name="Knowledge Base" icon="📚" data={status?.memory?.chroma} />
+            <NeuralNode name="Edge Intelligence" icon="🛰️" data={status?.router?.ollama} />
           </div>
         </div>
 
         {/* Agent Performance */}
         <div className="glass-panel col-span-4" style={{ display: 'flex', flexDirection: 'column' }}>
-          <h3 className="text-cyan">Agent Performance</h3>
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '1rem' }}>
+          <h3>Performance Hub</h3>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '1.2rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span className="text-muted">Agent Persona</span>
-              <select onChange={handlePersonaChange} style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid var(--glass-border)', color: 'white', borderRadius: '8px', padding: '0.3rem 0.5rem', cursor: 'pointer', outline: 'none' }}>
+              <span className="text-muted">Active Persona</span>
+              <select onChange={handlePersonaChange} value={status?.personality} style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--glass-border)', color: 'white', borderRadius: '10px', padding: '0.4rem 0.8rem', cursor: 'pointer', outline: 'none', fontSize: '0.85rem' }}>
                 {personas.length > 0 ? personas.map(p => (
                   <option key={p.id} value={p.id} style={{ background: '#0f172a' }}>{p.label}</option>
                 )) : <option style={{ background: '#0f172a' }}>{status?.personality || 'Standard Agent'}</option>}
               </select>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span className="text-muted">Active Skills</span>
-              <strong>{status?.skills || 0} Tools</strong>
+              <span className="text-muted">Skill Registry</span>
+              <strong style={{ color: 'var(--primary)' }}>{status?.skills || 0} Autonomous Tools</strong>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span className="text-muted">Server Mode</span>
-              <strong>{status?.mode?.toUpperCase() || 'UNKNOWN'}</strong>
+              <span className="text-muted">Neural Mode</span>
+              <strong style={{ color: 'var(--accent)' }}>{status?.mode?.toUpperCase() || 'POLLING'}</strong>
             </div>
           </div>
-          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
-            <button onClick={handleTestDrive} style={{ flex: 1, padding: '0.8rem', borderRadius: '12px', border: 'none', background: 'linear-gradient(to right, #38bdf8, #818cf8)', color: 'white', fontWeight: 600, cursor: 'pointer' }}>
-              🚀 Test Drive
+          <div style={{ display: 'flex', gap: '0.8rem', marginTop: '1.5rem' }}>
+            <button className="primary-btn" onClick={handleTestDrive} style={{ flex: 1, padding: '1rem', borderRadius: '14px', border: 'none', background: 'linear-gradient(135deg, #38bdf8, #818cf8)', color: 'white', fontWeight: 700, cursor: 'pointer', boxShadow: '0 4px 15px rgba(56,189,248,0.2)' }}>
+              🚀 TEST DRIVE
             </button>
-            <button onClick={handleAudit} disabled={auditLoading} style={{ flex: 1, padding: '0.8rem', borderRadius: '12px', border: '1px solid var(--glass-border)', background: 'var(--glass)', color: 'white', fontWeight: 600, cursor: 'pointer' }}>
-              {auditLoading ? '⏳ Auditing...' : '🛡️ Sentinel Audit'}
+            <button onClick={handleAudit} disabled={auditLoading} style={{ flex: 1, padding: '1rem', borderRadius: '14px', border: '1px solid var(--glass-border)', background: 'rgba(255,255,255,0.03)', color: 'white', fontWeight: 700, cursor: 'pointer' }}>
+              {auditLoading ? '⏳ AUDITING...' : '🛡️ SENTINEL'}
             </button>
           </div>
         </div>
 
-        {/* Bottom Panels: Tabs for Chat vs Audit */}
-        <div className="glass-panel col-span-8" style={{ display: 'flex', flexDirection: 'column', minHeight: '420px' }}>
-          {/* Tab Switcher */}
-          <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
+        {/* Bottom Panels */}
+        <div className="glass-panel col-span-8" style={{ display: 'flex', flexDirection: 'column', minHeight: '480px' }}>
+          <div style={{ display: 'flex', gap: '1.5rem', marginBottom: '1.5rem', borderBottom: '1px solid var(--glass-border)', paddingBottom: '1rem' }}>
             {(['chat', 'audit'] as const).map(tab => (
-              <button key={tab} onClick={() => setActiveTab(tab)} style={{ padding: '0.4rem 1rem', borderRadius: '99px', border: '1px solid', borderColor: activeTab === tab ? 'var(--primary)' : 'var(--glass-border)', background: activeTab === tab ? 'rgba(56,189,248,0.1)' : 'transparent', color: activeTab === tab ? 'var(--primary)' : 'var(--text-secondary)', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600 }}>
-                {tab === 'chat' ? '💬 WebChat' : '🛡️ Sentinel Audit'}
+              <button key={tab} onClick={() => setActiveTab(tab)} style={{ background: 'none', border: 'none', color: activeTab === tab ? 'var(--primary)' : 'var(--text-secondary)', cursor: 'pointer', fontSize: '0.95rem', fontWeight: 700, position: 'relative', padding: '0.5rem 0' }}>
+                {tab === 'chat' ? '⚡ REAL-TIME CHAT' : '🛡️ AUDIT REPORT'}
+                {activeTab === tab && <div style={{ position: 'absolute', bottom: '-1px', left: 0, right: 0, height: '2px', background: 'var(--primary)', boxShadow: '0 0 10px var(--primary)' }} />}
               </button>
             ))}
           </div>
 
-          {/* Chat Panel */}
           {activeTab === 'chat' && (
             <>
-              <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.8rem', padding: '0.5rem', marginBottom: '1rem' }}>
+              <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem', padding: '0.5rem', marginBottom: '1.5rem', scrollbarWidth: 'thin' }}>
                 {chatMessages.map((msg, i) => (
                   <div key={i} style={{ display: 'flex', justifyContent: msg.isUser ? 'flex-end' : 'flex-start' }}>
-                    <div style={{ maxWidth: '80%', padding: '0.8rem 1.2rem', borderRadius: msg.isUser ? '18px 18px 4px 18px' : '18px 18px 18px 4px', background: msg.isUser ? 'linear-gradient(to right, #38bdf8, #818cf8)' : 'rgba(255,255,255,0.07)', fontSize: '0.9rem', lineHeight: 1.5, boxShadow: msg.isUser ? '0 4px 15px rgba(56,189,248,0.3)' : 'none' }}>
+                    <div style={{ maxWidth: '85%', padding: '1rem 1.4rem', borderRadius: msg.isUser ? '20px 20px 4px 20px' : '20px 20px 20px 4px', background: msg.isUser ? 'linear-gradient(135deg, #38bdf8, #818cf8)' : 'rgba(255,255,255,0.04)', border: msg.isUser ? 'none' : '1px solid var(--glass-border)', fontSize: '0.95rem', lineHeight: 1.6, boxShadow: msg.isUser ? '0 10px 20px rgba(56,189,248,0.2)' : 'none', position: 'relative' }}>
                       {msg.text}
                     </div>
                   </div>
                 ))}
                 {chatLoading && (
                   <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
-                    <div style={{ padding: '0.8rem 1.2rem', borderRadius: '18px 18px 18px 4px', background: 'rgba(255,255,255,0.07)', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
-                      ⏳ Thinking...
+                    <div style={{ padding: '1rem 1.4rem', borderRadius: '20px 20px 20px 4px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--glass-border)', fontSize: '0.95rem', color: 'var(--text-secondary)' }}>
+                      <div className="pulse" style={{ display: 'inline-block', marginRight: '8px' }} /> Processing Neural Sequence...
                     </div>
                   </div>
                 )}
                 <div ref={chatEndRef} />
               </div>
-              <div style={{ display: 'flex', gap: '0.8rem' }}>
+              <div style={{ display: 'flex', gap: '1rem', background: 'rgba(255,255,255,0.02)', padding: '0.5rem', borderRadius: '18px', border: '1px solid var(--glass-border)' }}>
                 <input
                   value={chatInput}
                   onChange={e => setChatInput(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && handleChat()}
-                  placeholder="Message OpenClaw Echo..."
+                  placeholder="Ask the Swarm anything..."
                   disabled={chatLoading}
-                  style={{ flex: 1, padding: '1rem 1.2rem', borderRadius: '12px', border: '1px solid var(--glass-border)', background: 'var(--glass)', color: 'white', fontFamily: 'inherit', outline: 'none', fontSize: '0.9rem' }}
+                  style={{ flex: 1, padding: '1rem 1.5rem', borderRadius: '14px', border: 'none', background: 'transparent', color: 'white', fontFamily: 'inherit', outline: 'none', fontSize: '1rem' }}
                 />
-                <button disabled={chatLoading} onClick={handleChat} style={{ padding: '0 1.5rem', borderRadius: '12px', border: 'none', background: 'linear-gradient(to right, #4ade80, #38bdf8)', color: '#0f172a', fontWeight: 700, cursor: chatLoading ? 'not-allowed' : 'pointer' }}>
+                <button disabled={chatLoading} onClick={handleChat} style={{ padding: '0 2rem', borderRadius: '14px', border: 'none', background: 'var(--primary)', color: '#0c1222', fontWeight: 800, cursor: 'pointer', transition: 'transform 0.2s' }}>
                   SEND
                 </button>
               </div>
             </>
           )}
 
-          {/* Audit Panel */}
           {activeTab === 'audit' && (
-            <div style={{ flex: 1, overflowY: 'auto' }}>
-              {!auditData && !auditLoading && (
-                <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-secondary)' }}>
-                  Click "🛡️ Sentinel Audit" to run a full system health check.
+            <div style={{ flex: 1, overflowY: 'auto', padding: '0.5rem' }}>
+              {!auditData && !auditLoading ? (
+                <div style={{ textAlign: 'center', padding: '4rem', opacity: 0.5 }}>
+                  <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>🛡️</div>
+                  Run a Sentinel Audit to verify system integrity.
                 </div>
-              )}
-              {auditLoading && <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-secondary)' }}>Running audit...</div>}
-              {auditData && (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.8rem' }}>
+              ) : auditLoading ? (
+                <div style={{ textAlign: 'center', padding: '4rem' }}>
+                  <div className="pulse" style={{ width: '40px', height: '40px', margin: '0 auto 1.5rem' }} />
+                  Scanning neural bridges...
+                </div>
+              ) : auditData ? (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
                   {auditData.checks.map((check, i) => (
-                    <div key={i} style={{ padding: '1rem', background: 'rgba(255,255,255,0.02)', borderRadius: '12px', borderLeft: `3px solid ${auditColor(check.status)}` }}>
-                      <strong style={{ display: 'block', marginBottom: '0.3rem', fontSize: '0.85rem' }}>{check.name}</strong>
-                      <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{check.details}</span>
+                    <div key={i} className="glass-panel" style={{ padding: '1.2rem', background: 'rgba(255,255,255,0.01)', borderLeft: `4px solid ${auditColor(check.status)}`, borderRadius: '12px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                        <strong style={{ fontSize: '0.9rem' }}>{check.name}</strong>
+                        <span style={{ fontSize: '0.7rem', color: auditColor(check.status), fontWeight: 800 }}>{check.status.toUpperCase()}</span>
+                      </div>
+                      <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>{check.details}</p>
                     </div>
                   ))}
                 </div>
-              )}
+              ) : null}
             </div>
           )}
         </div>
 
         {/* Live Telemetry */}
-        <div className="glass-panel col-span-4" style={{ display: 'flex', flexDirection: 'column', minHeight: '420px' }}>
-          <h3 className="text-purple">Live Telemetry</h3>
-          <div style={{ flex: 1, overflowY: 'auto', background: 'rgba(0,0,0,0.3)', padding: '1rem', borderRadius: '12px', fontFamily: 'monospace', fontSize: '0.8rem' }}>
+        <div className="glass-panel col-span-4" style={{ display: 'flex', flexDirection: 'column', minHeight: '480px' }}>
+          <h3>Neural Telemetry</h3>
+          <div style={{ flex: 1, overflowY: 'auto', background: 'rgba(0,0,0,0.4)', padding: '1.2rem', borderRadius: '16px', fontFamily: '"Fira Code", monospace', fontSize: '0.8rem', border: '1px solid rgba(255,255,255,0.05)' }}>
             {logs.length === 0
-              ? <p className="text-muted" style={{ textAlign: 'center', marginTop: '2rem' }}>Awaiting engine logs...</p>
+              ? <div className="text-muted" style={{ textAlign: 'center', marginTop: '3rem', opacity: 0.4 }}>Awaiting neural signal...</div>
               : logs.map((log, i) => (
-                <div key={i} style={{ marginBottom: '0.5rem', borderBottom: '1px solid rgba(255,255,255,0.04)', paddingBottom: '0.4rem' }}>
-                  <span style={{ color: 'var(--accent)', marginRight: '0.5rem' }}>[{log.timestamp}]</span>
-                  <span style={{ color: log.content.toLowerCase().includes('error') ? 'var(--error)' : 'var(--text-primary)' }}>{log.content}</span>
+                <div key={i} style={{ marginBottom: '0.6rem', borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '0.6rem', lineHeight: 1.4 }}>
+                  <span style={{ opacity: 0.4, marginRight: '0.8rem', fontSize: '0.7rem' }}>{log.timestamp}</span>
+                  <span className={getLogClass(log.content)}>{log.content}</span>
                 </div>
               ))
             }
