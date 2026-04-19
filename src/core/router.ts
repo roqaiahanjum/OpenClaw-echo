@@ -36,7 +36,7 @@ export class ModelRouter {
     async invoke(messages: any, logic?: string, options?: { tools?: any[] }) {
         this.initializeGemini();
 
-        let retries = 2;
+        let retries = 0;
         while (retries >= 0) {
             try {
                 console.log("[Router] Routing query through Gemini...");
@@ -51,7 +51,7 @@ export class ModelRouter {
                 return await Promise.race([
                     model.invoke(messages),
                     new Promise((_, reject) =>
-                        setTimeout(() => reject(new Error("Gemini timeout after 30s")), 30000)
+                        setTimeout(() => reject(new Error("Gemini timeout after 60s")), 60000)
                     )
                 ]);
             } catch (error: any) {
@@ -85,4 +85,4 @@ export class ModelRouter {
             }
         };
     }
-} // ✅ This closing brace was missing!
+} 
