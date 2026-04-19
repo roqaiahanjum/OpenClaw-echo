@@ -64,14 +64,9 @@ async function executeAutonomousFlow(input: string, chatId: string, isPhoto: boo
         }
 
         let messages: any[] = [
-            new SystemMessage(`${persona.prompt}
-    Rules:
-    - Keep responses SHORT and DIRECT — max 3-4 sentences.
-    - Only answer what was asked, nothing extra.
-    - Do NOT bring up unrelated topics from memory.
-    - If an image is provided, describe it or follow instructions.
-    - Context from history:
-    ${context}`),
+            new SystemMessage(`You are OpenClaw Echo, a helpful AI assistant.
+Be brief and direct. Max 2-3 sentences.
+Context: ${context}`),
             new HumanMessage({ content: messageContent })
         ];
 
