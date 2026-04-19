@@ -1,6 +1,5 @@
 // @ts-nocheck
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
-import { ChatOllama } from "@langchain/ollama";
 import * as dotenv from "dotenv";
 
 dotenv.config();
@@ -8,7 +7,6 @@ dotenv.config();
 export class ModelRouter {
     private static instance: ModelRouter;
     private cloudModel: any = null;
-    private localModel: any = null;
 
     private constructor() {
         console.log("[Router] Service initialized (Cloud-Native Mode).");
@@ -35,26 +33,8 @@ export class ModelRouter {
         }
     }
 
-    private initializeOllama() {
-        if (process.env.USE_OLLAMA !== "true") {
-            console.log("[Router] Ollama disabled in cloud mode.");
-            return;
-        }
-        if (this.localModel) return;
-        try {
-            this.localModel = new ChatOllama({
-                baseUrl: process.env.OLLAMA_BASE_URL || "http://localhost:11434",
-                model: process.env.OLLAMA_MODEL || "llama3:latest",
-            });
-            console.log("[Router] 🟢 Local Ollama Bridge established!");
-        } catch (error: any) {
-            console.warn("[Router] Ollama Service not detected at runtime.");
-        }
-    }
-
     async invoke(messages: any, logic?: string, options?: { tools?: any[] }) {
         this.initializeGemini();
-        this.initializeOllama();
 
         let retries = 2;
         while (retries >= 0) {
@@ -68,7 +48,6 @@ export class ModelRouter {
 
                 if (!model) throw new Error("Gemini not initialized");
 
-                // ✅ 30s timeout
                 return await Promise.race([
                     model.invoke(messages),
                     new Promise((_, reject) =>
