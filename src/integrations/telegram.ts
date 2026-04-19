@@ -21,8 +21,8 @@ dotenv.config();
  */
 
 const bot = new Telegraf(process.env.TELEGRAM_TOKEN || "");
-const router = new ModelRouter();
-const memory = new MemoryManager();
+const router = ModelRouter.getInstance();
+const memory = MemoryManager.getInstance();
 const app = express();
 app.use(express.json());
 
@@ -43,7 +43,15 @@ async function executeAutonomousFlow(input: string, chatId: string, isPhoto: boo
 
         // 2. Context retrieval + Trimming (Requirement: max 1500 chars)
         DashboardLogger.log(`[Flow] Step 2: Retrieving and trimming context...`);
-        let context = await memory.getContext(input);
+        let context = "";
+        try {
+            context = await memory.getContext(input);
+            DashboardLogger.log(`[Flow] Step 2: Context retrieved successfully.`);
+        } catch (e: any) {
+            DashboardLogger.log(`[Flow] Step 2: Context retrieval timed out or failed. Passing empty context.`);
+            context = "No previous context available.";
+        }
+
         if (context.length > 1500) {
             context = context.slice(0, 1500) + "... [Truncated]";
             DashboardLogger.log(`[System] Context trimmed for token safety.`);
@@ -52,7 +60,7 @@ async function executeAutonomousFlow(input: string, chatId: string, isPhoto: boo
         // 3. Model Invocation
         DashboardLogger.log(`[Flow] Step 3: Invoking ModelRouter...`);
         const tools = SkillRegistry.getTools();
-        
+
         let messageContent: any = input;
         if (isPhoto && photoLink) {
             messageContent = [
@@ -62,13 +70,16 @@ async function executeAutonomousFlow(input: string, chatId: string, isPhoto: boo
         }
 
         let messages: any[] = [
-            new SystemMessage(`${persona.prompt} 
-            Rules:
-            - Use tools if needed.
-            - Check local knowledge base via 'read_sandbox_file' or 'user_profile.txt'.
-            - If an image is provided, describe it or follow instructions.
-            - Context from history (trimmed): 
-            ${context}`),
+            new SystemMessage(`${persona.prompt}
+    Rules:
+    - Use tools if needed.
+    - Keep responses SHORT and DIRECT — max 3-4 sentences.
+    - Only answer what was asked, nothing extra.
+    - Do NOT bring up unrelated topics from memory.
+    - Check local knowledge base via 'read_sandbox_file' or 'user_profile.txt'.
+    - If an image is provided, describe it or follow instructions.
+    - Context from history:
+    ${context}`),
             new HumanMessage({ content: messageContent })
         ];
 
@@ -123,7 +134,7 @@ async function executeAutonomousFlow(input: string, chatId: string, isPhoto: boo
         const isRateLimit = msg.includes("429") || error.status === 429 || msg.toLowerCase().includes("too many requests");
         const isHardQuota = isRateLimit && (msg.toLowerCase().includes("quota") || msg.toLowerCase().includes("limit"));
         const isTimeout = msg.includes("503") || error.status === 503 || msg.toLowerCase().includes("timeout");
-        
+
         // Rate Limit Handling (Attempt retry once ONLY if not a hard quota)
         if (isRateLimit && !isRetry && !isHardQuota) {
             DashboardLogger.log("[Status] Transient rate limit detected. Waiting 2s for retry...");
@@ -133,7 +144,7 @@ async function executeAutonomousFlow(input: string, chatId: string, isPhoto: boo
 
         // Specific user feedback
         let userFeedback = `❌ Error: ${error.message}`;
-        
+
         if (isHardQuota) {
             userFeedback = "⚠️ Gemini Quota Exceeded. I attempted to use Ollama, but it seems there was an issue. Please ensure Ollama is running or try again later.";
         } else if (isRateLimit) {
@@ -143,7 +154,7 @@ async function executeAutonomousFlow(input: string, chatId: string, isPhoto: boo
         } else if (error.message.includes("tokens")) {
             userFeedback = "⚠️ The message is too long for my current memory buffer.";
         }
-        
+
         await replyFn(userFeedback);
     }
 }
@@ -172,7 +183,7 @@ export function splitMessage(text: string, maxLength: number = 4000): string[] {
  */
 async function telegramHandler(ctx: Context) {
     if (!ctx.message) return;
-    
+
     // @ts-ignore - telegraf filters handle this but TS doesn't see it
     const input = (ctx.message as any).text || (ctx.message as any).caption || "Analyze this image.";
     const isPhoto = !!(ctx.message as any).photo;
@@ -187,17 +198,17 @@ async function telegramHandler(ctx: Context) {
             const base64 = Buffer.from(response.data, 'binary').toString('base64');
             photoLink = `data:image/jpeg;base64,${base64}`;
             DashboardLogger.log(`[Vision] Image securely downloaded and Base64 encoded for Gemini.`);
-        } catch(e) {
+        } catch (e) {
             console.error("Failed to fetch image for Gemini:", e);
             photoLink = link.href; // Fallback
         }
     }
 
     await executeAutonomousFlow(
-        input, 
-        String(ctx.chat?.id), 
-        isPhoto, 
-        async (content) => { 
+        input,
+        String(ctx.chat?.id),
+        isPhoto,
+        async (content) => {
             const chunks = splitMessage(content);
             for (const chunk of chunks) {
                 await ctx.reply(chunk);
@@ -215,7 +226,7 @@ bot.command("clear", async (ctx) => {
         await memory.clearHistory();
         await ctx.reply("🧹 Memory cleared! My context buffer has been completely reset. What's on your mind?");
         DashboardLogger.log(`[System] User requested memory clear.`);
-    } catch(e) {
+    } catch (e) {
         await ctx.reply("❌ Error clearing memory.");
     }
 });
@@ -290,13 +301,13 @@ app.post("/api/chat", async (req: Request, res: Response) => {
     DashboardLogger.log(`[WebChat] Inbound from dashboard user.`);
 
     let agentResponse = "";
-    
+
     try {
         await executeAutonomousFlow(
             userMsg,
             "WEB_INTERFACE",
             false,
-            async (content) => { 
+            async (content) => {
                 agentResponse = content;
                 DashboardLogger.log(`[WebChat Outbound] ${content}`);
             }
@@ -312,9 +323,9 @@ app.get("/api/sandbox", async (req: Request, res: Response) => {
     try {
         const sandboxDir = path.resolve("src/sandbox");
         const files = await fs.readdir(sandboxDir);
-        res.json(files);
+        res.json({ files });
     } catch (err) {
-        res.json([]);
+        res.json({ files: [] });
     }
 });
 
@@ -322,14 +333,13 @@ app.get("/api/sandbox/raw", async (req: Request, res: Response) => {
     try {
         const fileName = req.query.file as string;
         if (!fileName) return res.status(400).send("No file specified");
-        
+
         const filePath = path.join(path.resolve("src/sandbox"), fileName);
         if (!filePath.startsWith(path.resolve("src/sandbox"))) {
             return res.status(403).send("Forbidden");
         }
 
-        const content = await fs.readFile(filePath, "utf-8");
-        res.send(content);
+        res.sendFile(filePath);
     } catch (err) {
         res.status(404).send("Not found");
     }
@@ -347,7 +357,7 @@ app.get("/api/knowledge", async (req: Request, res: Response) => {
                 timestamp: v.metadata.timestamp,
                 id: v.metadata.id
             }));
-        
+
         // Return unique sources
         const unique = Array.from(new Set(knowledgeItems.map((k: any) => k.source)));
         res.json({ count: knowledgeItems.length, sources: unique });
@@ -371,10 +381,10 @@ app.get("/api/audit", async (req: Request, res: Response) => {
 app.post("/api/maintenance", async (req: Request, res: Response) => {
     try {
         DashboardLogger.log("[System] Deep maintenance cycle triggered via dashboard.");
-        
+
         // 1. Optimize SQLite & Refresh Vector Store
         await (memory as any).optimize();
-        
+
         // 2. Synchronize Knowledge (Sandbox -> Memory)
         const sandboxDir = path.resolve("src/sandbox");
         const files = await fs.readdir(sandboxDir);
@@ -444,7 +454,7 @@ app.use((err: any, req: Request, res: Response, next: any) => {
 app.post("/api/test-drive", async (req: Request, res: Response) => {
     DashboardLogger.log("[TestDrive] Initiating autonomous simulation...");
     const simulatedChallenge = "Research the historical significance of Turing machines and save a brief note to sandbox as 'history.txt'";
-    
+
     executeAutonomousFlow(
         simulatedChallenge,
         "VIRTUAL_DASHBOARD",
@@ -471,7 +481,7 @@ export const startServer = async () => {
     }
 
     const mode = (process.env.TELEGRAM_MODE || "polling").toLowerCase();
-    
+
     return new Promise((resolve, reject) => {
         const server = app.listen(PORT, async () => {
             DashboardLogger.log(`🚀 OPENCLAW ECHO: ${mode.toUpperCase()} MODE ACTIVATED`);

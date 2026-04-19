@@ -295,7 +295,7 @@ export const visualizeArchitectureTool = tool(
 );
 
 import { MemoryManager } from "../memory/manager";
-const memory = new MemoryManager();
+const memory = MemoryManager.getInstance();
 
 /**
  * Knowledge Ingestion Tool (RAG Scholar)

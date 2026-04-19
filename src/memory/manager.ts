@@ -20,12 +20,13 @@ interface InteractionRow {
 }
 
 export class MemoryManager {
+    private static instance: MemoryManager;
     private db: sqlite3.Database;
     private vectorStore: MemoryVectorStore | null = null;
     private embeddings: GoogleGenerativeAIEmbeddings;
     private storagePath: string = path.join(__dirname, "semantic_core.json");
 
-    constructor() {
+    private constructor() {
         // 1. Initialize SQLite
         this.db = new sqlite3.Database("./openclaw.db", (err) => {
             if (err) {
@@ -44,6 +45,13 @@ export class MemoryManager {
 
         // 3. Initialize Local Vector Store
         this.initVectorStore();
+    }
+
+    public static getInstance(): MemoryManager {
+        if (!MemoryManager.instance) {
+            MemoryManager.instance = new MemoryManager();
+        }
+        return MemoryManager.instance;
     }
 
     private async initVectorStore() {
@@ -160,7 +168,13 @@ export class MemoryManager {
 
         if (this.vectorStore) {
             try {
-                const results = await this.vectorStore.similaritySearch(userInput, 4);
+                // Add a 10s timeout for semantic search to prevent hangs
+                const searchPromise = this.vectorStore.similaritySearch(userInput, 4);
+                const results = await Promise.race([
+                    searchPromise,
+                    new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 10000))
+                ]) as any[];
+
                 const chatHistory = results.filter(d => !d.metadata.isKnowledge);
                 const knowledgeBase = results.filter(d => d.metadata.isKnowledge);
 

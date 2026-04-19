@@ -14,13 +14,13 @@
 
 ## 📖 Short Description
 
-**OpenClaw Echo** is a massively capable, self-orchestrating AI layer and Telegram bot. Unlike standard reactive chatbots, Echo exists as an independent entity capable of maintaining persistent memory, scheduling its own background tasks, analyzing massive codebases, synthesizing data into charts, and automatically pushing updates to its own version control. It runs on a hybrid intelligence model, dynamically failing over between the blazing-fast Google Gemini and local Ollama edge nodes.
+**OpenClaw Echo** is a massively capable, self-orchestrating AI layer and Telegram bot. Unlike standard reactive chatbots, Echo exists as an independent entity capable of maintaining persistent memory, scheduling its own background tasks, analyzing massive codebases, synthesizing data into charts, and automatically pushing updates to its own version control. It runs on a hybrid intelligence model, dynamically failing over between the state-of-the-art **Google Gemini 2.0 Flash** and local **Ollama** edge nodes via a Singleton-protected service layer.
 
 ---
 
 ## ✨ Features List
 
-* **Hybrid Intelligence (`ModelRouter`)**: Seamlessly routes between Google Gemini (Cloud API v1beta) and Ollama (Local Edge). Includes smart retry logic for API limits.
+* **Hybrid Intelligence (`ModelRouter`)**: Seamlessly routes between **Google Gemini 2.0 Flash** (Cloud API v1beta) and **Ollama Llama 3** (Local Edge). Includes a **40-second stability timeout** and Singleton-protected handshake logic.
 * **Autonomous 6-Step Neural Flow**: Extracts context, trims history, invokes intelligence, executes tools, replies, and persists data entirely autonomously.
 * **The Swarm (Delegation Strategy)**: Spawns asynchronous sub-agents (`Researcher`, `Coder`, `Analyst`, `Writer`, `QA_Engineer`) to execute gigantic monolithic tasks in parallel.
 * **Persistent Memory & Vector RAG**: Maintains a rolling SQLite history and a serverless JSON Vector Core for long-term semantic retrieval.
@@ -164,7 +164,7 @@ Create a `.env` file in the root directory.
 | `GOOGLE_API_KEY` | ✅ | Google Gemini API key |
 | `TELEGRAM_TOKEN` | ✅ | Telegram Bot token from @BotFather |
 | `OLLAMA_BASE_URL` | ❌ | Ollama endpoint (default: `http://localhost:11434` / `http://ollama:11434`) |
-| `OLLAMA_MODEL` | ❌ | Local model name (default: `llama3`) |
+| `OLLAMA_MODEL` | ❌ | Local model name (default: `llama3:latest`) |
 | `PORT` | ❌ | Dashboard port (default: `3005`) |
 | `SMTP_HOST` | ❌ | SMTP server for email dispatch (`setup for notification agent`) |
 | `SMTP_PORT` | ❌ | SMTP port (default: `587`) |

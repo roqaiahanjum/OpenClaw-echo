@@ -1,5 +1,27 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useLayoutEffect } from 'react'
 import './App.css'
+import mermaid from 'mermaid'
+
+mermaid.initialize({
+  startOnLoad: false,
+  theme: 'dark',
+  securityLevel: 'loose',
+  fontFamily: 'Outfit, sans-serif'
+});
+
+const MermaidRenderer = ({ chart }: { chart: string }) => {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (ref.current && chart) {
+      mermaid.render(`mermaid-${Math.random().toString(36).substr(2, 9)}`, chart).then(({ svg }) => {
+        if (ref.current) ref.current.innerHTML = svg;
+      }).catch(err => {
+        console.error("Mermaid error:", err);
+      });
+    }
+  }, [chart]);
+  return <div ref={ref} className="mermaid-container" />;
+};
 
 interface SystemStatus {
   mode: string;
@@ -38,7 +60,8 @@ function App() {
   const [auditData, setAuditData] = useState<{ score: number, checks: AuditCheck[] } | null>(null);
   const [auditLoading, setAuditLoading] = useState(false);
   const [personas, setPersonas] = useState<{ id: string, label: string }[]>([]);
-  const [activeTab, setActiveTab] = useState<'chat' | 'audit'>('chat');
+  const [activeTab, setActiveTab] = useState<'chat' | 'audit' | 'insights'>('chat');
+  const [insightFiles, setInsightFiles] = useState<string[]>([]);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
 
@@ -53,7 +76,6 @@ function App() {
       setError(err.message);
     }
   };
-
   const fetchPersonas = async () => {
     try {
       const res = await fetch('/api/personality');
@@ -62,9 +84,18 @@ function App() {
     } catch (err) {}
   };
 
+  const fetchInsights = async () => {
+    try {
+      const res = await fetch('/api/sandbox');
+      const data = await res.json();
+      setInsightFiles(data.files || []);
+    } catch (err) {}
+  };
+
   useEffect(() => {
     fetchStatus();
     fetchPersonas();
+    fetchInsights();
     const interval = setInterval(fetchStatus, 3000);
 
     const eventSource = new EventSource('/api/stream');
@@ -233,9 +264,9 @@ function App() {
         {/* Bottom Panels */}
         <div className="glass-panel col-span-8" style={{ display: 'flex', flexDirection: 'column', minHeight: '480px' }}>
           <div style={{ display: 'flex', gap: '1.5rem', marginBottom: '1.5rem', borderBottom: '1px solid var(--glass-border)', paddingBottom: '1rem' }}>
-            {(['chat', 'audit'] as const).map(tab => (
-              <button key={tab} onClick={() => setActiveTab(tab)} style={{ background: 'none', border: 'none', color: activeTab === tab ? 'var(--primary)' : 'var(--text-secondary)', cursor: 'pointer', fontSize: '0.95rem', fontWeight: 700, position: 'relative', padding: '0.5rem 0' }}>
-                {tab === 'chat' ? '⚡ REAL-TIME CHAT' : '🛡️ AUDIT REPORT'}
+            {(['chat', 'audit', 'insights'] as const).map(tab => (
+              <button key={tab} onClick={() => { setActiveTab(tab); if (tab === 'insights') fetchInsights(); }} style={{ background: 'none', border: 'none', color: activeTab === tab ? 'var(--primary)' : 'var(--text-secondary)', cursor: 'pointer', fontSize: '0.95rem', fontWeight: 700, position: 'relative', padding: '0.5rem 0' }}>
+                {tab === 'chat' ? '⚡ REAL-TIME CHAT' : tab === 'audit' ? '🛡️ AUDIT REPORT' : '📊 INSIGHTS GALLERY'}
                 {activeTab === tab && <div style={{ position: 'absolute', bottom: '-1px', left: 0, right: 0, height: '2px', background: 'var(--primary)', boxShadow: '0 0 10px var(--primary)' }} />}
               </button>
             ))}
@@ -247,7 +278,15 @@ function App() {
                 {chatMessages.map((msg, i) => (
                   <div key={i} style={{ display: 'flex', justifyContent: msg.isUser ? 'flex-end' : 'flex-start' }}>
                     <div style={{ maxWidth: '85%', padding: '1rem 1.4rem', borderRadius: msg.isUser ? '20px 20px 4px 20px' : '20px 20px 20px 4px', background: msg.isUser ? 'linear-gradient(135deg, #38bdf8, #818cf8)' : 'rgba(255,255,255,0.04)', border: msg.isUser ? 'none' : '1px solid var(--glass-border)', fontSize: '0.95rem', lineHeight: 1.6, boxShadow: msg.isUser ? '0 10px 20px rgba(56,189,248,0.2)' : 'none', position: 'relative' }}>
-                      {msg.text}
+                      {msg.text.includes('```mermaid') ? (
+                        <>
+                          <div style={{ marginBottom: '1rem' }}>{msg.text.split('```mermaid')[0]}</div>
+                          <MermaidRenderer chart={msg.text.split('```mermaid')[1].split('```')[0].trim()} />
+                          <div>{msg.text.split('```')[2]}</div>
+                        </>
+                      ) : (
+                        msg.text
+                      )}
                     </div>
                   </div>
                 ))}
@@ -301,6 +340,20 @@ function App() {
                   ))}
                 </div>
               ) : null}
+            </div>
+          )}
+
+          {activeTab === 'insights' && (
+            <div style={{ flex: 1, overflowY: 'auto', padding: '0.5rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1.5rem' }}>
+                {insightFiles.filter(f => f.endsWith('.svg') || f.endsWith('.png') || f.endsWith('.jpg')).map((file, i) => (
+                  <div key={i} className="glass-panel" style={{ padding: '1rem', border: '1px solid var(--glass-border)', overflow: 'hidden' }}>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginBottom: '0.8rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{file}</div>
+                    <img src={`/api/sandbox/raw?file=${file}`} alt={file} style={{ width: '100%', borderRadius: '12px', background: 'rgba(255,255,255,0.02)' }} />
+                  </div>
+                ))}
+                {insightFiles.length === 0 && <div style={{ textAlign: 'center', gridColumn: '1/-1', padding: '4rem', opacity: 0.5 }}>No insights generated yet. Ask me to create a chart!</div>}
+              </div>
             </div>
           )}
         </div>

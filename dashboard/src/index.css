@@ -143,3 +143,33 @@ h3 {
 .log-memory { color: var(--success); }
 .log-error { color: var(--error); }
 .log-warn { color: var(--warn); }
+
+/* Mermaid & Insights */
+.mermaid-container {
+    background: rgba(255, 255, 255, 0.02);
+    padding: 1rem;
+    border-radius: 12px;
+    border: 1px solid var(--glass-border);
+    margin: 1rem 0;
+    overflow: auto;
+}
+
+.mermaid-container svg {
+    max-width: 100%;
+    height: auto;
+}
+
+.insights-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 1.5rem;
+    padding: 1rem;
+}
+
+.insight-card {
+    transition: transform 0.3s ease;
+}
+
+.insight-card:hover {
+    transform: scale(1.02);
+}

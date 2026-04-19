@@ -6,11 +6,19 @@ import * as dotenv from "dotenv";
 dotenv.config();
 
 export class ModelRouter {
+    private static instance: ModelRouter;
     private cloudModel: any = null;
     private localModel: any = null;
 
-    constructor() {
+    private constructor() {
         console.log("[Router] Service initialized (Lazy Mode). Waiting for query...");
+    }
+
+    public static getInstance(): ModelRouter {
+        if (!ModelRouter.instance) {
+            ModelRouter.instance = new ModelRouter();
+        }
+        return ModelRouter.instance;
     }
 
     private initializeGemini() {
@@ -19,7 +27,7 @@ export class ModelRouter {
         try {
             this.cloudModel = new ChatGoogleGenerativeAI({
                 apiKey: process.env.GOOGLE_API_KEY,
-                model: "gemini-1.5-flash", // Reverting to confirmed stable flash model
+                model: "gemini-2.0-flash", // Upgraded to latest supported flash model
             });
             console.log("[Router] 🟢 Google Gemini Bridge established (v1beta)!");
         } catch (error: any) {

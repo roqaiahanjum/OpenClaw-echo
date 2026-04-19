@@ -35,6 +35,17 @@ async function bootstrap() {
 
         process.on("SIGINT", handleShutdown);
         process.on("SIGTERM", handleShutdown);
+        
+        // 5. Global Exception Protection
+        process.on("uncaughtException", (err) => {
+            console.error("[Panic] Uncaught Exception:", err);
+            // Don't exit immediately; let the logger attempt to broadcast
+            setTimeout(() => process.exit(1), 1000);
+        });
+
+        process.on("unhandledRejection", (reason, promise) => {
+            console.error("[Panic] Unhandled Rejection at:", promise, "reason:", reason);
+        });
 
     } catch (error) {
         console.error("[Fatal] Failed to bootstrap OpenClaw Echo:", error);
