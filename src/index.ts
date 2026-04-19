@@ -1,5 +1,11 @@
 // @ts-nocheck
-import "dotenv/config"; // 1. Immediate environment loading (prevents hoisting issues)
+import "dotenv/config";
+
+// ✅ Fix for Railway deployment
+if (typeof File === "undefined") {
+    const { File } = require("buffer");
+    global.File = File;
+}
 
 /**
  * OpenClaw Echo: Safe Bootstrap Entry Point
@@ -10,24 +16,19 @@ async function bootstrap() {
     console.log("    🚀 OPENCLAW ECHO: ACTIVATE 🚀        ");
     console.log("-----------------------------------------");
 
-    // 2. Critical Key Handshake
     const requiredEnv = ["TELEGRAM_TOKEN", "GOOGLE_API_KEY"];
     const missingEnv = requiredEnv.filter(key => !process.env[key]);
 
     if (missingEnv.length > 0) {
         console.error(`[Fatal] Critical environment variables missing: ${missingEnv.join(", ")}`);
-        console.error("[Fatal] Please check your .env file and restart the bot.");
         process.exit(1);
     }
 
     try {
-        // 3. Dynamic Import: Loads the Telegram integration ONLY after environment is ready.
-        // This solves constructor 'replace' errors and race conditions.
         console.log("[System] Environment verified. Loading services...");
         const { startServer, stopServer } = await import("./integrations/telegram");
         const server = await startServer();
 
-        // 4. Graceful Shutdown Configuration
         const handleShutdown = async () => {
             await stopServer(server);
             process.exit(0);
@@ -35,11 +36,9 @@ async function bootstrap() {
 
         process.on("SIGINT", handleShutdown);
         process.on("SIGTERM", handleShutdown);
-        
-        // 5. Global Exception Protection
+
         process.on("uncaughtException", (err) => {
             console.error("[Panic] Uncaught Exception:", err);
-            // Don't exit immediately; let the logger attempt to broadcast
             setTimeout(() => process.exit(1), 1000);
         });
 
@@ -53,5 +52,4 @@ async function bootstrap() {
     }
 }
 
-// Start the sequence
 bootstrap();
