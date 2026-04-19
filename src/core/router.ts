@@ -40,12 +40,12 @@ export class ModelRouter {
             console.error("[Router] Gemini Handshake Error:", error.message);
         }
     }
-
-
     private initializeOllama() {
-        // ✅ Skip Ollama on Railway to save memory
-        if (process.env.USE_OLLAMA === "false") return;
-
+        // ✅ Ollama disabled on cloud deployment
+        if (process.env.USE_OLLAMA !== "true") {
+            console.log("[Router] Ollama disabled in cloud mode.");
+            return;
+        }
         if (this.localModel) return;
         try {
             this.localModel = new ChatOllama({
@@ -57,7 +57,6 @@ export class ModelRouter {
             console.warn("[Router] Ollama Service not detected at runtime.");
         }
     }
-
     /**
      * Safety Ping: Verifies connectivity and key validity in < 5s.
      * Prevents long hangs on Railway when the API key is invalid or quota is dead.
