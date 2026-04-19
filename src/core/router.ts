@@ -41,7 +41,11 @@ export class ModelRouter {
         }
     }
 
+
     private initializeOllama() {
+        // ✅ Skip Ollama on Railway to save memory
+        if (process.env.USE_OLLAMA === "false") return;
+
         if (this.localModel) return;
         try {
             this.localModel = new ChatOllama({
