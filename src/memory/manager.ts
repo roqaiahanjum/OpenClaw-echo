@@ -1,6 +1,6 @@
 // @ts-nocheck
 import sqlite3 from "sqlite3";
-import { MemoryVectorStore } from "langchain/vectorstores/memory";
+import { MemoryVectorStore } from "@langchain/classic/vectorstores/memory";
 import { GoogleGenerativeAIEmbeddings } from "@langchain/google-genai";
 import * as dotenv from "dotenv";
 import * as fs from "fs/promises";
@@ -40,7 +40,7 @@ export class MemoryManager {
         // 2. Initialize Embeddings ✅ Fixed: env key + correct model, no apiVersion
         this.embeddings = new GoogleGenerativeAIEmbeddings({
             apiKey: process.env.GOOGLE_API_KEY,
-            model: "text-embedding-004",
+            model: "embedding-001",
         });
 
         // 3. Initialize Local Vector Store

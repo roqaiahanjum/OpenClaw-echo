@@ -430,6 +430,10 @@ app.use((err: any, req: Request, res: Response, next: any) => {
     res.status(500).json({ error: "Internal Server Error", details: err.message });
 });
 
+app.get("/health", (req: Request, res: Response) => {
+    res.status(200).send("OK");
+});
+
 app.get("*", (req: Request, res: Response) => {
     res.sendFile(path.join(dashboardPath, "index.html"), (err) => {
         if (err) res.status(404).send("Dashboard not built.");
@@ -445,48 +449,42 @@ export const startServer = async () => {
     const mode = (process.env.TELEGRAM_MODE || "polling").toLowerCase();
 
     return new Promise((resolve, reject) => {
-        const server = app.listen(PORT, async () => {
+        const server = app.listen(PORT, "0.0.0.0", async () => {
             DashboardLogger.log(`🚀 OPENCLAW ECHO: ${mode.toUpperCase()} MODE ACTIVATED`);
-            if (mode === "webhook") {
-                const WEBHOOK_URL = `${process.env.TELEGRAM_WEBHOOK_URL}${WEBHOOK_PATH}`;
-                try {
-                    await bot.telegram.setWebhook(WEBHOOK_URL);
-                    DashboardLogger.log("✅ Webhook registered.");
-                } catch (err: any) { }
-            } else {
-                bot.launch().catch(err => { });
-                DashboardLogger.log("✅ Polling active.");
-            }
-
+            
+            // Start Clockwork Scheduler
             Clockwork.setExecutor(async (prompt: string) => {
                 await executeAutonomousFlow(
-                    prompt,
-                    "CLOCKWORK_SCHEDULER",
-                    false,
-                    async (content) => {
-                        DashboardLogger.log(`[Clockwork] Result: ${content.slice(0, 200)}`);
-                    }
+                    prompt, "CLOCKWORK_SCHEDULER", false,
+                    async (content) => { DashboardLogger.log(`[Clockwork] Result: ${content.slice(0, 200)}`); }
                 );
             });
             await Clockwork.boot();
+
+            // Connect Telegram
+            if (mode === "webhook") {
+                const WEBHOOK_URL = `${process.env.TELEGRAM_WEBHOOK_URL}${WEBHOOK_PATH}`;
+                try {
+                    await bot.telegram.setWebhook(WEBHOOK_URL, { drop_pending_updates: true });
+                    DashboardLogger.log("✅ Webhook registered.");
+                } catch (err: any) { 
+                    console.error("[Telegram] Webhook setup failed:", err.message); 
+                }
+            } else {
+                try {
+                    await bot.launch({ dropPendingUpdates: true });
+                    DashboardLogger.log("✅ Polling active.");
+                } catch (err: any) {
+                    console.error("[Telegram] Init error / Webhook conflict:", err.message);
+                }
+            }
+
             resolve(server);
         });
 
         server.on('error', (err: any) => {
-            if (err.code === 'EADDRINUSE') {
-                const FALLBACK_PORT = PORT + 1;
-                if (FALLBACK_PORT <= 3006) {
-                    console.warn(`[System] Port ${PORT} busy. Retrying on ${FALLBACK_PORT}...`);
-                    app.listen(FALLBACK_PORT, () => {
-                        bot.launch().catch(err => { });
-                        resolve(server);
-                    });
-                } else {
-                    process.exit(1);
-                }
-            } else {
-                reject(err);
-            }
+            console.error(`[Server Error] Failed to bind to port ${PORT}:`, err.message);
+            reject(err);
         });
     });
 };

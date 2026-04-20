@@ -28,6 +28,7 @@ async function bootstrap() {
         console.log("[System] Environment verified. Loading services...");
         const { startServer, stopServer } = await import("./integrations/telegram");
         const server = await startServer();
+        console.log("[System] System Online - Railway Deployment Ready");
 
         const handleShutdown = async () => {
             await stopServer(server);
