@@ -8,7 +8,7 @@ FROM node:20-alpine AS dashboard-builder
 WORKDIR /build
 
 COPY dashboard/package*.json ./
-RUN npm install
+RUN npm install --legacy-peer-deps --legacy-peer-deps
 
 COPY dashboard/ ./
 RUN npm run build
@@ -23,7 +23,7 @@ RUN apk add --no-cache curl
 
 # Install backend dependencies (includes devDeps for ts-node)
 COPY package*.json ./
-RUN npm install
+RUN npm install --legacy-peer-deps
 
 # Copy backend source
 COPY src/ ./src/
