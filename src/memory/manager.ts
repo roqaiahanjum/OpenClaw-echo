@@ -40,7 +40,7 @@ export class MemoryManager {
         // 2. Initialize Embeddings ✅ Fixed: env key + correct model, no apiVersion
         this.embeddings = new GoogleGenerativeAIEmbeddings({
             apiKey: process.env.GOOGLE_API_KEY,
-            model: "embedding-001",
+            model: "text-embedding-004",
         });
 
         // 3. Initialize Local Vector Store

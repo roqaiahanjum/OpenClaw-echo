@@ -603,7 +603,7 @@ export const manageScheduledTasksTool = tool(
                 const tasks = await Clockwork.listTasks();
                 if (tasks.length === 0) return "No scheduled tasks found.";
                 return "Scheduled Tasks:\n" + tasks.map((t: any) =>
-                    `- [${t.id}] ${t.name} | Every ${t.intervalMs / 60000}min | ${t.enabled ? 'ACTIVE' : 'PAUSED'} | Last: ${t.lastRun || 'Never'}`
+                    `- [${t.id}] ${t.name} | Every ${t.intervalMs / 120000}min | ${t.enabled ? 'ACTIVE' : 'PAUSED'} | Last: ${t.lastRun || 'Never'}`
                 ).join("\n");
             } else if (action === "toggle") {
                 if (!taskId || enabled === undefined) return "Error: taskId and enabled required.";
