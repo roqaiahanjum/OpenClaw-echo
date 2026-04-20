@@ -24,7 +24,7 @@ export class ModelRouter {
         try {
             this.cloudModel = new ChatGoogleGenerativeAI({
                 apiKey: process.env.GOOGLE_API_KEY,
-                model: "gemini-2.0-flash-lite",
+                model: "gemini-2.5-flash",
                 temperature: 0.7
             });
             console.log("[Router] 🟢 Google Gemini Bridge established.");

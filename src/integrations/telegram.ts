@@ -52,8 +52,7 @@ async function executeAutonomousFlow(input: string, chatId: string, isPhoto: boo
 
         DashboardLogger.log(`[Flow] Step 3: Invoking ModelRouter...`);
 
-        // ✅ Fix 1: Tools disabled for faster response
-        const tools: any[] = [];
+        const tools = SkillRegistry.getTools();
 
         let messageContent: any = input;
         if (isPhoto && photoLink) {
