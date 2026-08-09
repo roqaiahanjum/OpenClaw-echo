@@ -13,6 +13,14 @@ import { PERSONALITIES, PersonalityMode } from "../core/personalities";
 import { Telemetry } from "../core/telemetry";
 import { ProjectAnalyzer } from "../core/analyzer";
 import { Clockwork } from "../core/clockwork";
+import { generateSmartPlan, formatPlanForPrompt, decomposeIntoACPTasks } from "../core/planner";
+import { SubAgentManager } from "../agents/SubAgentManager";
+import { verifyStepResult } from "../core/verifier";
+import { determineRecoveryStrategy } from "../core/recovery";
+import { localVerifyToolResult } from "../core/localVerifier";
+import { isSimpleConversation } from "../core/conversationGuard";
+
+import { telemetry } from "./telemetry";
 
 dotenv.config();
 
@@ -21,6 +29,7 @@ const router = ModelRouter.getInstance();
 const memory = MemoryManager.getInstance();
 const app = express();
 app.use(express.json());
+app.use(express.static(path.resolve("public")));
 
 const dashboardPath = path.resolve("dashboard/dist");
 app.use(express.static(dashboardPath));
@@ -30,29 +39,134 @@ const WEBHOOK_PATH = "/api/webhook";
 
 let activePersonality: PersonalityMode = "standard";
 
+const invokeWithTimeout = async (messages: any[], mode?: string, options?: any) => {
+    const timeoutMs = 35000;
+    const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('LLM_TIMEOUT')), timeoutMs)
+    );
+    return Promise.race([
+        ModelRouter.getInstance().invokeWithRetry(messages, mode, options),
+        timeoutPromise,
+    ]);
+};
+
 async function executeAutonomousFlow(input: string, chatId: string, isPhoto: boolean, replyFn: (content: string) => Promise<any>, photoLink?: string, isRetry: boolean = false) {
     try {
         const persona = PERSONALITIES[activePersonality];
         DashboardLogger.log(`[Persona] Active: ${persona.label}`);
         DashboardLogger.log(`[Flow] Step 1: Processing interaction for ${chatId}`);
 
-        DashboardLogger.log(`[Flow] Step 2: Retrieving and trimming context...`);
+        const tStart = Date.now();
+        DashboardLogger.log(`[Flow] Step 2: Retrieving context across 4 memory layers...`);
         let context = "";
+        const tMemStart = Date.now();
         try {
-            context = await memory.getContext(input);
+            context = await memory.getContext(input, chatId?.toString() || 'default');
         } catch (e: any) {
             context = "No previous context available.";
         }
+        const tMemEnd = Date.now();
+        DashboardLogger.log(`[Memory] Retrieval: ${tMemEnd - tMemStart}ms`);
 
-        // ✅ Fix 2: Reduced to 500 chars for faster Railway response
-        if (context.length > 500) {
-            context = context.slice(0, 500) + "... [Truncated]";
-            DashboardLogger.log(`[System] Context trimmed for token safety.`);
+        const simpleGreetings = ['hi', 'hello', 'hey', 'thanks', 'ok', 'okay', 'bye', 'good morning', 'good night'];
+        const isSimpleMessage = simpleGreetings.some(g => input.toLowerCase().trim() === g);
+
+        if ((isSimpleMessage || isSimpleConversation(input)) && !isPhoto) {
+            DashboardLogger.log(`[FastPath] FAST PATH DETECTED — Skipping tool loading (1 Gemini Call).`);
+            const systemPromptText = `You are OpenClaw Echo, a helpful AI assistant. Be brief, polite, and direct (max 2-3 sentences).\nContext: ${context}`;
+            const simpleMessages = [
+                new SystemMessage(systemPromptText),
+                new HumanMessage(input)
+            ];
+
+            const response: any = await invokeWithTimeout(simpleMessages, "simple");
+            const replyText = (response.content as string) || "Hello! How can I help you today?";
+
+            await replyFn(replyText);
+            await memory.addInteraction(input, replyText, chatId?.toString() || 'default');
+            Telemetry.broadcast("status_update", { event: "flow_complete" });
+            return;
+        }
+
+        // ◄── DIRECT SEARCH FAST-PATH ──►
+        const searchKeywords = ["search", "find", "latest news", "google", "look up", "news"];
+        const lowerInput = input.toLowerCase().trim();
+        const isSearchQuery = searchKeywords.some(kw => lowerInput.includes(kw));
+
+        if (isSearchQuery && !isPhoto) {
+            DashboardLogger.log(`[SearchFastPath] DIRECT SEARCH FAST-PATH DETECTED — Bypassing planner & invoking web_search tool directly.`);
+            const webSearchTool = SkillRegistry.getToolByName("web_search");
+            let rawSearchResults = "";
+            if (webSearchTool) {
+                try {
+                    rawSearchResults = await webSearchTool.invoke({ query: input });
+                } catch (sErr: any) {
+                    rawSearchResults = "Web search service temporarily unavailable.";
+                }
+            }
+
+            const searchSystemPrompt = `You are OpenClaw Echo, a helpful AI assistant.
+Synthesize these web search results clearly and concisely for the user (max 3-4 bullet points or sentences).
+Web Search Results:
+${rawSearchResults}
+
+Context:
+${context}`;
+
+            const searchMessages = [
+                new SystemMessage(searchSystemPrompt),
+                new HumanMessage(input)
+            ];
+
+            let replyText = "";
+            try {
+                const response: any = await invokeWithTimeout(searchMessages, "search_fastpath");
+                replyText = (response.content as string) || rawSearchResults;
+            } catch (sErr: any) {
+                console.warn("[SearchFastPath] Gemini synthesis timed out or failed. Sending clean formatted search results directly.");
+                replyText = rawSearchResults;
+            }
+
+            await replyFn(replyText);
+            await memory.addInteraction(input, replyText, chatId?.toString() || 'default');
+            Telemetry.broadcast("status_update", { event: "flow_complete" });
+            return;
         }
 
         DashboardLogger.log(`[Flow] Step 3: Invoking ModelRouter...`);
 
         const tools = SkillRegistry.getTools();
+        const toolNames = tools.map((t: any) => t.name);
+        const plan = await generateSmartPlan(input, toolNames);
+        let planText = "";
+        if (plan) {
+            planText = formatPlanForPrompt(plan);
+        }
+
+        // ◄── SUB-AGENT DELEGATION FAST-PATH (Phase 7 & 8) ──►
+        const lowerInputStr = input.toLowerCase();
+        const isMultiAgentTask = (
+            (lowerInputStr.includes("research") && (lowerInputStr.includes("code") || lowerInputStr.includes("script") || lowerInputStr.includes("write"))) ||
+            lowerInputStr.includes("multi-step") ||
+            lowerInputStr.includes("delegate")
+        );
+
+        if (isMultiAgentTask && !isPhoto) {
+            DashboardLogger.log(`[OmniSubAgent] MULTI-AGENT DELEGATION DETECTED — Dispatching via SubAgentManager & ACP Protocol.`);
+            const acpTasks = decomposeIntoACPTasks(input, plan || undefined);
+            const workerResults = await SubAgentManager.getInstance().delegateTasksParallel(acpTasks);
+
+            const finalReply = workerResults.map(res => {
+                if (res.status === 'SUCCESS') return res.resultData;
+                return `⚠️ [${(res.targetAgent || 'WORKER').toUpperCase()} Task Failed]: ${res.error || 'Unknown error'}`;
+            }).join('\n\n---\n\n');
+
+            const finalResponse = finalReply || "Sub-agent delegation completed successfully.";
+            await replyFn(finalResponse);
+            await memory.addInteraction(input, finalResponse, chatId?.toString() || 'default');
+            Telemetry.broadcast("status_update", { event: "flow_complete" });
+            return;
+        }
 
         let messageContent: any = input;
         if (isPhoto && photoLink) {
@@ -62,21 +176,26 @@ async function executeAutonomousFlow(input: string, chatId: string, isPhoto: boo
             ];
         }
 
-        let messages: any[] = [
-            new SystemMessage(`You are OpenClaw Echo, a helpful AI assistant.
+        let systemPromptText = `You are OpenClaw Echo, a helpful AI assistant.
 Be brief and direct. Max 2-3 sentences.
-Context: ${context}`),
+Context: ${context}`;
+        if (planText) {
+            systemPromptText += planText;
+        }
+
+        let messages: any[] = [
+            new SystemMessage(systemPromptText),
             new HumanMessage({ content: messageContent })
         ];
 
         DashboardLogger.log(`[Flow] Step 4: Executing autonomous cycle...`);
         let finalResponse = "";
         let iterations = 0;
-        const MAX_ITERATIONS = 3;
+        const MAX_ITERATIONS = 5;
 
         while (iterations < MAX_ITERATIONS) {
             const logic = isPhoto ? "image_analysis" : "complex";
-            const response = await router.invoke(messages, logic, { tools });
+            const response: any = await invokeWithTimeout(messages, "agent", { tools });
             const tool_calls = (response as any).tool_calls || [];
 
             if (tool_calls.length > 0 && !isPhoto) {
@@ -86,9 +205,78 @@ Context: ${context}`),
                     if (tool) {
                         DashboardLogger.log(`[Status] Executing ${toolCall.name}...`);
                         const output = await tool.invoke(toolCall.args);
+
+                        // ◄── HYBRID VERIFIER (LOCAL + GEMINI FALLBACK) ──►
+                        const localCheck = localVerifyToolResult(toolCall.name, toolCall.args, String(output));
+                        let verification: { success: boolean; reason: string };
+
+                        if (localCheck.status === "pass") {
+                            DashboardLogger.log(`[LocalVerifier] PASS — ${localCheck.reason}`);
+                            verification = { success: true, reason: localCheck.reason };
+                        } else if (localCheck.status === "fail") {
+                            DashboardLogger.log(`[LocalVerifier] FAIL — ${localCheck.reason}`);
+                            verification = { success: false, reason: localCheck.reason };
+                        } else {
+                            DashboardLogger.log(`[LocalVerifier] UNCERTAIN — ${localCheck.reason}. Falling back to Gemini verifier.`);
+                            verification = await verifyStepResult(input, toolCall.name, String(output));
+                        }
+
+                        let finalOutput = String(output);
+                        if (!verification.success) {
+                            console.warn(`[Verifier] Step failed verification: ${verification.reason}`);
+
+                            // ◄── SELF-HEALING RECOVERY LAYER ──►
+                            const availableToolNames = tools.map((t: any) => t.name);
+                            const recovery = await determineRecoveryStrategy({
+                                userGoal: input,
+                                toolName: toolCall.name,
+                                toolArgs: toolCall.args,
+                                output: String(output),
+                                failureReason: verification.reason,
+                                availableTools: availableToolNames,
+                                attemptCount: 1
+                            });
+
+                            DashboardLogger.log(`[Recovery] Strategy selected: ${recovery.strategy} (${recovery.reason})`);
+
+                            if ((recovery.strategy === "modify_args" || recovery.strategy === "alternative_tool" || recovery.strategy === "retry_same")) {
+                                const targetToolName = recovery.newToolName || toolCall.name;
+                                const targetArgs = recovery.newArgs || toolCall.args;
+                                const recoveryTool = SkillRegistry.getToolByName(targetToolName);
+
+                                if (recoveryTool) {
+                                    DashboardLogger.log(`[Recovery] Re-executing via ${targetToolName}...`);
+                                    const recoveryOutput = await recoveryTool.invoke(targetArgs);
+
+                                    const localRecCheck = localVerifyToolResult(targetToolName, targetArgs, String(recoveryOutput));
+                                    let reVerification: { success: boolean; reason: string };
+
+                                    if (localRecCheck.status === "pass") {
+                                        DashboardLogger.log(`[LocalVerifier] PASS — ${localRecCheck.reason}`);
+                                        reVerification = { success: true, reason: localRecCheck.reason };
+                                    } else if (localRecCheck.status === "fail") {
+                                        DashboardLogger.log(`[LocalVerifier] FAIL — ${localRecCheck.reason}`);
+                                        reVerification = { success: false, reason: localRecCheck.reason };
+                                    } else {
+                                        reVerification = await verifyStepResult(input, targetToolName, String(recoveryOutput));
+                                    }
+
+                                    if (reVerification.success) {
+                                        finalOutput = String(recoveryOutput);
+                                        console.log(`[Recovery] ✅ Inline recovery succeeded!`);
+                                    } else {
+                                        finalOutput += `\n\n[RECOVERY ATTEMPTED: Tried ${targetToolName} via ${recovery.strategy}. Reason: ${reVerification.reason}]`;
+                                    }
+                                }
+                            } else {
+                                finalOutput += `\n\n[VERIFICATION NOTE: This result may not fully satisfy the goal. Reason: ${verification.reason}. Recovery recommendation: ${recovery.strategy} - ${recovery.reason}]`;
+                            }
+                        } else {
+                            console.log(`[Verifier] Step passed verification.`);
+                        }
                         messages.push(new ToolMessage({
                             tool_call_id: toolCall.id,
-                            content: String(output)
+                            content: finalOutput
                         }));
                     }
                 }
@@ -102,8 +290,8 @@ Context: ${context}`),
         DashboardLogger.log(`[Flow] Step 5: Replying...`);
         await replyFn(finalResponse);
 
-        DashboardLogger.log(`[Flow] Step 6: Persisting interaction...`);
-        await memory.addInteraction(input, finalResponse);
+        DashboardLogger.log(`[Flow] Step 6: Persisting interaction across 4 memory layers...`);
+        await memory.addInteraction(input, finalResponse, chatId?.toString() || 'default');
 
         Telemetry.broadcast("status_update", { event: "flow_complete" });
 
@@ -122,16 +310,20 @@ Context: ${context}`),
             return executeAutonomousFlow(input, chatId, isPhoto, replyFn, photoLink, true);
         }
 
-        let userFeedback = `❌ Error: ${error.message}`;
+        let userFeedback = "⚠️ Service temporarily busy. Please try again in a few moments.";
 
-        if (isHardQuota) {
-            userFeedback = "⚠️ Quota exceeded. Please try again later.";
+        if (msg.includes("LLM_TIMEOUT") || msg.includes("timed out")) {
+            userFeedback = "⏱️ Network model timed out while processing your request. Please try again or rephrase.";
+        } else if (isHardQuota) {
+            userFeedback = "⚠️ API Quota limit reached. Router operating in local context fallback mode.";
         } else if (isRateLimit) {
             userFeedback = "I'm thinking, please resend your message in a few seconds.";
         } else if (isTimeout) {
             userFeedback = "⏱️ Connection issue, please try again.";
         } else if (msg.includes("tokens")) {
             userFeedback = "⚠️ Message too long for my memory buffer.";
+        } else if (msg.includes("GoogleGenerativeAI Error") || msg.includes("404") || msg.includes("500")) {
+            userFeedback = "⚠️ Model service unavailable. Please retry your query.";
         }
 
         await replyFn(userFeedback);
@@ -174,29 +366,94 @@ async function telegramHandler(ctx: Context) {
         }
     }
 
-    await executeAutonomousFlow(
-        input,
-        String(ctx.chat?.id),
-        isPhoto,
-        async (content) => {
-            const chunks = splitMessage(content);
-            for (const chunk of chunks) {
-                await ctx.reply(chunk);
-            }
-        },
-        photoLink
-    );
+    // Start typing indicator
+    await ctx.sendChatAction('typing').catch(() => { });
+    const typingInterval = setInterval(() => {
+        ctx.sendChatAction('typing').catch(() => { });
+    }, 4000);
+
+    try {
+        await executeAutonomousFlow(
+            input,
+            String(ctx.chat?.id),
+            isPhoto,
+            async (content) => {
+                const chunks = splitMessage(content);
+                for (const chunk of chunks) {
+                    await ctx.reply(chunk);
+                }
+            },
+            photoLink
+        );
+    } finally {
+        clearInterval(typingInterval);
+    }
 }
 
 bot.command("start", (ctx) => ctx.reply("🚀 OpenClaw Echo is online and ready! Port: " + PORT));
 
 bot.command("clear", async (ctx) => {
     try {
-        await memory.clearHistory();
-        await ctx.reply("🧹 Memory cleared! What's on your mind?");
-        DashboardLogger.log(`[System] User requested memory clear.`);
+        await memory.clearHistory(String(ctx.chat?.id));
+        await ctx.reply("🧹 Chat history cleared for this conversation! What's on your mind?");
+        DashboardLogger.log(`[System] User requested history clear for ${ctx.chat?.id}.`);
     } catch (e) {
         await ctx.reply("❌ Error clearing memory.");
+    }
+});
+
+bot.command("memory", async (ctx) => {
+    try {
+        const stats = await memory.getStats();
+        await ctx.reply(
+            `🧠 *Memory System Statistics*\n\n` +
+            `• Interactions (Short-Term): ${stats.interactions}\n` +
+            `• Knowledge Facts: ${stats.facts}\n` +
+            `• Summaries: ${stats.summaries}\n` +
+            `• Vector Embeddings: ${stats.vectors}`,
+            { parse_mode: "Markdown" }
+        );
+    } catch (e: any) {
+        await ctx.reply("❌ Error fetching memory stats.");
+    }
+});
+
+bot.command("facts", async (ctx) => {
+    try {
+        const facts = await memory.getAllFacts();
+        if (!facts || facts.length === 0) {
+            await ctx.reply("ℹ️ No knowledge facts stored yet.");
+            return;
+        }
+        const factsText = facts.map(f => `• *[${f.category}]* ${f.key}: ${f.value}`).join("\n");
+        await ctx.reply(`📚 *Knowledge Base Facts*\n\n${factsText}`, { parse_mode: "Markdown" });
+    } catch (e: any) {
+        await ctx.reply("❌ Error fetching facts.");
+    }
+});
+
+bot.command("searchmemory", async (ctx) => {
+    try {
+        const text = (ctx.message as any).text || "";
+        const query = text.replace("/searchmemory", "").trim();
+        if (!query) {
+            await ctx.reply("Usage: /searchmemory <query>");
+            return;
+        }
+        const result = await memory.searchMemory(query);
+        await ctx.reply(`🔍 *Memory Search Results for "${query}"*\n\n${result}`);
+    } catch (e: any) {
+        await ctx.reply("❌ Error searching memory.");
+    }
+});
+
+bot.command("clearall", async (ctx) => {
+    try {
+        await memory.clearAllMemory();
+        await ctx.reply("🧹 All memory layers (SQLite interactions, Knowledge facts, Summaries, and Vector embeddings) have been completely wiped.");
+        DashboardLogger.log(`[System] User executed /clearall.`);
+    } catch (e: any) {
+        await ctx.reply("❌ Error performing clearall.");
     }
 });
 
@@ -205,16 +462,30 @@ bot.on(message("photo"), telegramHandler);
 
 app.get("/", async (req: Request, res: Response) => {
     try {
-        const dashboardPath = path.join(__dirname, "dashboard.html");
-        const content = await fs.readFile(dashboardPath, "utf-8");
-        res.send(content);
+        const publicDashboardPath = path.resolve("public/dashboard.html");
+        res.sendFile(publicDashboardPath);
     } catch (err) {
         res.status(500).send("OpenClaw Echo: Dashboard Error.");
     }
 });
 
-app.get("/api/stream", (req: Request, res: Response) => {
-    Telemetry.subscribe(res);
+app.get("/api/telemetry/stream", (req: Request, res: Response) => {
+    telemetry.handleSSEStream(req, res);
+});
+
+app.get("/api/stats", async (req: Request, res: Response) => {
+    try {
+        const memStats = await memory.getStats();
+        const execStats = telemetry.getExecutionStats();
+        const routerHealth = await router.checkHealth();
+        res.json({
+            memory: memStats,
+            execution: execStats,
+            router: routerHealth
+        });
+    } catch (err) {
+        res.status(500).json({ error: "Failed to fetch stats" });
+    }
 });
 
 app.get("/api/status", async (req: Request, res: Response) => {
@@ -440,18 +711,26 @@ app.get("*", (req: Request, res: Response) => {
     });
 });
 
-export const startServer = async () => {
+export const startServer = async (initialPort?: number) => {
     if (!process.env.TELEGRAM_TOKEN) {
         console.error("[Fatal] TELEGRAM_TOKEN missing.");
         process.exit(1);
     }
 
     const mode = (process.env.TELEGRAM_MODE || "polling").toLowerCase();
+    const basePort = initialPort || parseInt(process.env.PORT || "3005");
+    const MAX_ATTEMPTS = 10;
 
-    return new Promise((resolve, reject) => {
-        const server = app.listen(PORT, "0.0.0.0", async () => {
-            DashboardLogger.log(`🚀 OPENCLAW ECHO: ${mode.toUpperCase()} MODE ACTIVATED`);
-            
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+        const currentPort = basePort + attempt;
+        try {
+            const server = await new Promise((resolve, reject) => {
+                const s = app.listen(currentPort, "0.0.0.0", () => resolve(s));
+                s.on("error", (err: any) => reject(err));
+            });
+
+            DashboardLogger.log(`🚀 OPENCLAW ECHO: ${mode.toUpperCase()} MODE ACTIVATED on Port ${currentPort}`);
+
             // Start Clockwork Scheduler
             Clockwork.setExecutor(async (prompt: string) => {
                 await executeAutonomousFlow(
@@ -467,8 +746,8 @@ export const startServer = async () => {
                 try {
                     await bot.telegram.setWebhook(WEBHOOK_URL, { drop_pending_updates: true });
                     DashboardLogger.log("✅ Webhook registered.");
-                } catch (err: any) { 
-                    console.error("[Telegram] Webhook setup failed:", err.message); 
+                } catch (err: any) {
+                    console.error("[Telegram] Webhook setup failed:", err.message);
                 }
             } else {
                 try {
@@ -479,21 +758,30 @@ export const startServer = async () => {
                 }
             }
 
-            resolve(server);
-        });
-
-        server.on('error', (err: any) => {
-            console.error(`[Server Error] Failed to bind to port ${PORT}:`, err.message);
-            reject(err);
-        });
-    });
+            return server;
+        } catch (err: any) {
+            if (err.code === "EADDRINUSE" && attempt < MAX_ATTEMPTS - 1) {
+                console.warn(`[CleanPort] Port ${currentPort} in use (EADDRINUSE). Retrying on port ${currentPort + 1}...`);
+            } else {
+                throw err;
+            }
+        }
+    }
 };
 
 export const stopServer = async (server: any) => {
     try {
-        if (server) await new Promise((resolve) => server.close(resolve));
-        await bot.stop();
-        await memory.close();
+        if (server && server.close) {
+            await new Promise((resolve) => server.close(resolve));
+        }
+        if (bot && typeof bot.stop === "function") {
+            try {
+                await bot.stop("SIGINT");
+            } catch (e) { }
+        }
+        if (memory && typeof memory.close === "function") {
+            await memory.close();
+        }
     } catch (error: any) {
         console.error("[System] Error during shutdown:", error.message);
     }

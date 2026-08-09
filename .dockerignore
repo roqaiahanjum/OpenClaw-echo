@@ -11,3 +11,4 @@ src/memory/semantic_core.json
 
 # Dashboard node_modules (rebuilt in Stage 1)
 dashboard/node_modules
+c

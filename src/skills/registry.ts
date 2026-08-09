@@ -1,4 +1,28 @@
-import { webSearchTool, localFileSystemTool, writeSandboxFileTool, currentTimeTool, updateUserProfileTool, runSandboxCodeTool, synthesizeSkillTool, visualizeArchitectureTool, ingestKnowledgeTool, generateDataChartTool, runSystemAuditTool, generateProjectManualTool, manageProjectGoalsTool, scrapeWebsiteTool, delegateTaskTool, sendEmailReportTool, manageScheduledTasksTool, manageGitRepositoryTool } from "./tools";
+import {
+    webSearchTool,
+    localFileSystemTool,
+    writeSandboxFileTool,
+    currentTimeTool,
+    updateUserProfileTool,
+    runSandboxCodeTool,
+    synthesizeSkillTool,
+    visualizeArchitectureTool,
+    ingestKnowledgeTool,
+    generateDataChartTool,
+    runSystemAuditTool,
+    generateProjectManualTool,
+    manageProjectGoalsTool,
+    scrapeWebsiteTool,
+    delegateTaskTool,
+    sendEmailReportTool,
+    manageScheduledTasksTool,
+    manageGitRepositoryTool,
+    saveKnowledgeTool,
+    getAllKnowledgeTool,
+    getMemoryStatsTool,
+    ingestToLongTermMemoryTool,
+    searchMemoryTool
+} from "./tools";
 
 /**
  * SkillRegistry
@@ -23,14 +47,24 @@ export class SkillRegistry {
         delegateTaskTool,
         sendEmailReportTool,
         manageScheduledTasksTool,
-        manageGitRepositoryTool
+        manageGitRepositoryTool,
+        saveKnowledgeTool,
+        getAllKnowledgeTool,
+        getMemoryStatsTool,
+        ingestToLongTermMemoryTool,
+        searchMemoryTool
     ];
+
+    private static cachedTools: any[] | null = null;
 
     /**
      * returns an array of all registered tools.
      */
     static getTools() {
-        return [...this.tools];
+        if (!this.cachedTools) {
+            this.cachedTools = [...this.tools];
+        }
+        return this.cachedTools;
     }
 
     /**
@@ -39,6 +73,7 @@ export class SkillRegistry {
     static registerTool(tool: any) {
         if (!this.getToolByName(tool.name)) {
             this.tools.push(tool);
+            this.cachedTools = null;
             return true;
         }
         return false;

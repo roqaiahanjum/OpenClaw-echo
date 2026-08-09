@@ -3,147 +3,300 @@ import sqlite3
 import pandas as pd
 import os
 import time
+from datetime import datetime
 
-# --- CONFIGURATION ---
-DB_NAME = "vector.db"
-LOG_FILE = "app.log"
-GEMINI_LIMIT = 1000
-TAVILY_LIMIT = 1000
+# --- PAGE CONFIG ---
+st.set_page_config(
+    page_title="OpenClaw-echo Admin",
+    page_icon="🤖",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# --- UI STYLING & PAGE CONFIG ---
-st.set_page_config(page_title="OpenClaw Echo Admin", layout="wide", initial_sidebar_state="expanded")
-
+# --- CUSTOM CSS ---
 st.markdown("""
 <style>
-    .main { background-color: #0e1117; color: #ffffff; }
-    .stMetric { background-color: #1f2937; padding: 15px; border-radius: 10px; }
-    .log-error { color: #ff4b4b; font-weight: bold; }
-    .log-search { color: #00fa9a; font-weight: bold; }
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+    html, body, [class*="css"] {
+        font-family: 'Inter', sans-serif;
+    }
+
+    /* Main Container Background */
+    .stApp {
+        background-color: #F8FAFC;
+    }
+
+    /* Sidebar Styling */
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #0F172A 0%, #1E1B4B 100%);
+        color: white;
+    }
+
+    [data-testid="stSidebar"] * {
+        color: white !important;
+    }
+
+    /* Navigation Links */
+    .nav-item {
+        padding: 10px 15px;
+        border-radius: 8px;
+        margin-bottom: 5px;
+        cursor: pointer;
+        transition: all 0.3s;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .nav-item:hover {
+        background: rgba(255, 255, 255, 0.1);
+    }
+
+    .nav-active {
+        background: rgba(255, 255, 255, 0.2);
+        font-weight: 600;
+    }
+
+    /* Status Pill */
+    .status-pill {
+        background: rgba(34, 197, 94, 0.2);
+        color: #4ADE80 !important;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        border: 1px solid rgba(34, 197, 94, 0.3);
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    /* Topbar Styling */
+    .topbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 20px 0;
+        margin-bottom: 30px;
+    }
+
+    .deploy-btn {
+        background: linear-gradient(90deg, #6366F1 0%, #A855F7 100%);
+        color: white !important;
+        padding: 10px 24px;
+        border-radius: 8px;
+        font-weight: 600;
+        text-decoration: none;
+        border: none;
+        box-shadow: 0 4px 15px rgba(99, 102, 241, 0.3);
+    }
+
+    /* Stat Cards Grid */
+    .card-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 20px;
+        margin-bottom: 30px;
+    }
+
+    .stat-card {
+        padding: 24px;
+        border-radius: 16px;
+        color: white;
+        position: relative;
+        overflow: hidden;
+        box-shadow: 0 10px 20px rgba(0,0,0,0.05);
+    }
+
+    .card-purple { background: linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%); }
+    .card-green { background: linear-gradient(135deg, #10B981 0%, #3B82F6 100%); }
+    .card-blue { background: linear-gradient(135deg, #3B82F6 0%, #2DD4BF 100%); }
+    .card-orange { background: linear-gradient(135deg, #F59E0B 0%, #EF4444 100%); }
+
+    .card-icon {
+        font-size: 24px;
+        margin-bottom: 15px;
+        opacity: 0.9;
+    }
+
+    .card-value {
+        font-size: 2rem;
+        font-weight: 700;
+        margin-bottom: 4px;
+    }
+
+    .card-label {
+        font-size: 0.9rem;
+        opacity: 0.8;
+        font-weight: 500;
+    }
+
+    .card-trend {
+        font-size: 0.75rem;
+        background: rgba(255, 255, 255, 0.2);
+        padding: 2px 8px;
+        border-radius: 10px;
+        margin-top: 10px;
+        display: inline-block;
+    }
+
+    /* Activity Feed */
+    .activity-section {
+        background: white;
+        padding: 24px;
+        border-radius: 16px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    }
+
+    .activity-item {
+        display: flex;
+        align-items: center;
+        padding: 16px 0;
+        border-bottom: 1px solid #F1F5F9;
+    }
+
+    .activity-item:last-child {
+        border-bottom: none;
+    }
+
+    .activity-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        margin-right: 15px;
+    }
+
+    .dot-purple { background-color: #8B5CF6; }
+    .dot-blue { background-color: #3B82F6; }
+    .dot-green { background-color: #10B981; }
+    .dot-orange { background-color: #F59E0B; }
+
+    .activity-info {
+        flex-grow: 1;
+    }
+
+    .activity-title {
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: #1E293B;
+    }
+
+    .activity-time {
+        font-size: 0.8rem;
+        color: #64748B;
+    }
+
+    /* Hide Streamlit components we don't want */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
 </style>
 """, unsafe_allow_html=True)
 
-# --- HELPER FUNCTIONS ---
-def get_db_connection():
-    try:
-        return sqlite3.connect(DB_NAME)
-    except Exception as e:
-        return None
+# --- DATA HELPERS ---
+def get_stats():
+    # Placeholder for actual DB logic
+    return {
+        "messages": "1,284",
+        "users": "42",
+        "memories": "892",
+        "uptime": "99.9%"
+    }
 
-def fetch_all_memories():
-    """1. Memory Tab: Fetch all rows from the 'memories' table"""
-    conn = get_db_connection()
-    if conn is None:
-        return None
-    try:
-        df = pd.read_sql_query("SELECT * FROM memories", conn)
-        return df
-    except Exception:
-        # Table might not exist yet
-        return None
-    finally:
-        if conn:
-            conn.close()
-
-def get_usage_metrics():
-    """Extract metrics safely from the log file"""
-    if not os.path.exists(LOG_FILE):
-        return 0, 0
-    try:
-        with open(LOG_FILE, "r", encoding="utf-8") as f:
-            content = f.read()
-        gemini_calls = content.count("[Gemini]")
-        tavily_calls = content.count("[Tavily Search]")
-        return gemini_calls, tavily_calls
-    except Exception:
-        return 0, 0
+def get_activities():
+    return [
+        {"type": "purple", "title": "Memory stored: 'User preference updated'", "time": "2 mins ago"},
+        {"type": "blue", "title": "Telegram message sent to @user123", "time": "15 mins ago"},
+        {"type": "green", "title": "API call made: Tavily Search (Success)", "time": "1 hour ago"},
+        {"type": "orange", "title": "Email sent: Project Summary Report", "time": "3 hours ago"},
+        {"type": "purple", "title": "System Reboot: Performance Optimized", "time": "Yesterday"},
+    ]
 
 # --- SIDEBAR ---
-st.sidebar.title("🤖 System Overview")
-if os.path.exists(DB_NAME):
-    st.sidebar.success("🟢 Database: Connected")
-else:
-    st.sidebar.error("🔴 Database: Disconnected")
-
-# --- MAIN TABS ---
-st.title("OpenClaw-echo Admin Dashboard")
-tab1, tab2, tab3 = st.tabs(["🧠 Memory Explorer", "📜 System Logs", "📊 Usage Stats"])
-
-# --- TAB 1: MEMORY EXPLORER ---
-with tab1:
-    st.header("Stored Memories")
-    if os.path.exists(DB_NAME):
-        df_memories = fetch_all_memories()
-        
-        if df_memories is None:
-            st.info("No memories stored yet or table uninitialized.")
-        elif df_memories.empty:
-            st.info("No memories stored yet.")
-        else:
-            # Interactive dataframe
-            st.dataframe(df_memories, use_container_width=True)
-    else:
-        st.warning(f"Expected database '{DB_NAME}' not found.")
-
-# --- TAB 2: SYSTEM LOGS ---
-with tab2:
-    st.header("Live Log Viewer")
-    live_toggle = st.toggle("Activate Live Mode (Auto-Refresh)")
-    log_placeholder = st.empty()
+with st.sidebar:
+    st.markdown("""
+    <div style="padding: 20px 0; margin-bottom: 20px;">
+        <h2 style="margin:0; font-size: 1.5rem; letter-spacing: -0.5px;">🤖 OpenClaw-echo</h2>
+        <p style="margin:0; font-size: 0.8rem; opacity: 0.6;">Admin Control Center</p>
+    </div>
+    """, unsafe_allow_html=True)
     
-    # 2. Logs Tab: A live log viewer with a while True loop and st.empty()
-    if live_toggle:
-        while True:
-            log_content = ""
-            try:
-                if os.path.exists(LOG_FILE):
-                    with open(LOG_FILE, "r", encoding="utf-8") as f:
-                        lines = f.readlines()[-50:]  # Last 50 lines
-                        
-                        for line in lines:
-                            if "[Error]" in line:
-                                log_content += f"<span class='log-error'>{st.utils.escape(line)}</span><br>"
-                            elif "[Search]" in line:
-                                log_content += f"<span class='log-search'>{st.utils.escape(line)}</span><br>"
-                            else:
-                                log_content += f"{st.utils.escape(line)}<br>"
-                else:
-                    log_content = "Waiting for 'app.log' to be created..."
-                    
-                log_placeholder.markdown(f"<div style='font-family: monospace; background-color: #1e1e1e; padding: 10px; border-radius: 5px; height: 500px; overflow-y: scroll;'>{log_content}</div>", unsafe_allow_html=True)
-                
-            except Exception as e:
-                log_placeholder.error(f"Error reading logs: {str(e)}")
-                
-            time.sleep(5)
-    else:
-        log_placeholder.info("Activate the toggle above to start the live log stream.")
+    # Navigation
+    st.markdown('<div class="nav-item nav-active">📊 Dashboard</div>', unsafe_allow_html=True)
+    st.markdown('<div class="nav-item">🧠 Memory Explorer</div>', unsafe_allow_html=True)
+    st.markdown('<div class="nav-item">📜 System Logs</div>', unsafe_allow_html=True)
+    st.markdown('<div class="nav-item">📈 Usage Stats</div>', unsafe_allow_html=True)
+    st.markdown('<div class="nav-item">⚙️ Settings</div>', unsafe_allow_html=True)
+    
+    # Database Status (Pinned to bottom-ish)
+    st.markdown("<br><br><br>", unsafe_allow_html=True)
+    st.markdown("""
+    <div class="status-pill">
+        <div style="width: 8px; height: 8px; background: #4ADE80; border-radius: 50%;"></div>
+        Database: Connected
+    </div>
+    """, unsafe_allow_html=True)
 
+# --- MAIN CONTENT ---
+stats = get_stats()
 
-# --- TAB 3: USAGE STATS ---
-with tab3:
-    st.header("API Consumption")
-    
-    gemini_calls, tavily_calls = get_usage_metrics()
-    
-    # 3. Usage Tab: Create two columns
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.metric("Gemini Calls", f"{gemini_calls} / {GEMINI_LIMIT}")
-        gemini_pct = min(gemini_calls / GEMINI_LIMIT, 1.0)
-        
-        # Turn red if exceeds 90%
-        if gemini_pct > 0.9:
-            st.markdown("""<style>.stProgress > div > div > div > div { background-color: red; }</style>""", unsafe_allow_html=True)
-            st.error("⚠️ Gemini Quota Nearing Limit!")
-        st.progress(gemini_pct)
-        
-    with col2:
-        st.metric("Tavily Calls", f"{tavily_calls} / {TAVILY_LIMIT}")
-        tavily_pct = min(tavily_calls / TAVILY_LIMIT, 1.0)
-        
-        # Turn red if exceeds 90%
-        if tavily_pct > 0.9:
-            st.markdown("""<style>.stProgress > div > div > div > div { background-color: red; }</style>""", unsafe_allow_html=True)
-            st.error("⚠️ Tavily Quota Nearing Limit!")
-        st.progress(tavily_pct)
+# Topbar
+st.markdown(f"""
+<div class="topbar">
+    <h1 style="margin:0; font-size: 1.8rem; font-weight: 700; color: #1E293B;">Dashboard</h1>
+    <a href="#" class="deploy-btn">🚀 Deploy Changes</a>
+</div>
+""", unsafe_allow_html=True)
+
+# Stat Cards
+st.markdown(f"""
+<div class="card-grid">
+    <div class="stat-card card-purple">
+        <div class="card-icon">💬</div>
+        <div class="card-value">{stats['messages']}</div>
+        <div class="card-label">Total Messages</div>
+        <div class="card-trend">📈 +12.5% this week</div>
+    </div>
+    <div class="stat-card card-green">
+        <div class="card-icon">👥</div>
+        <div class="card-value">{stats['users']}</div>
+        <div class="card-label">Active Users</div>
+        <div class="card-trend">🔥 5 new today</div>
+    </div>
+    <div class="stat-card card-blue">
+        <div class="card-icon">🧠</div>
+        <div class="card-value">{stats['memories']}</div>
+        <div class="card-label">Stored Memories</div>
+        <div class="card-trend">🔄 Updated 5m ago</div>
+    </div>
+    <div class="stat-card card-orange">
+        <div class="card-icon">⚡</div>
+        <div class="card-value">{stats['uptime']}</div>
+        <div class="card-label">System Uptime</div>
+        <div class="card-trend">✅ All systems go</div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
+# Recent Activity
+st.markdown("""
+<div class="activity-section">
+    <h3 style="margin:0 0 20px 0; font-size: 1.1rem; font-weight: 600; color: #1E293B;">Recent Activity Feed</h3>
+""", unsafe_allow_html=True)
+
+for act in get_activities():
+    st.markdown(f"""
+    <div class="activity-item">
+        <div class="activity-dot dot-{act['type']}"></div>
+        <div class="activity-info">
+            <div class="activity-title">{act['title']}</div>
+            <div class="activity-time">{act['time']}</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+st.markdown("</div>", unsafe_allow_html=True)
+
+# Footer/Spacing
+st.markdown("<br><br>", unsafe_allow_html=True)

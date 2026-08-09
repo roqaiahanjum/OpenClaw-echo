@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenClaw Echo — Real-Time SSE Telemetry Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #0d1117; color: #c9d1d9; font-family: system-ui, -apple-system, sans-serif; }
+        .card { background-color: #161b22; border: 1px solid #30363d; border-radius: 0.5rem; }
+        .feed-box { background-color: #0d1117; font-family: monospace; font-size: 0.85rem; }
+    </style>
+</head>
+<body class="p-6">
+    <div class="max-w-7xl mx-auto space-y-6">
+        
+        <!-- Header -->
+        <div class="flex justify-between items-center pb-4 border-b border-gray-800">
+            <div>
+                <h1 class="text-2xl font-bold text-white flex items-center gap-3">
+                    <i class="fa-solid fa-robot text-blue-500"></i> OpenClaw Echo Telemetry
+                </h1>
+                <p class="text-xs text-gray-400 mt-1">Autonomous AI Agent System Monitor (SSE Real-Time Stream)</p>
+            </div>
+            <div class="flex items-center gap-4">
+                <span id="connection-badge" class="px-3 py-1 text-xs rounded-full bg-yellow-900/50 text-yellow-400 border border-yellow-700">
+                    <i class="fa-solid fa-circle-notch fa-spin mr-1"></i> Connecting SSE...
+                </span>
+                <span id="agent-state-badge" class="px-3 py-1 text-xs font-bold rounded-full bg-blue-900/50 text-blue-400 border border-blue-700">
+                    IDLE
+                </span>
+            </div>
+        </div>
+
+        <!-- Metric Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div class="card p-4">
+                <p class="text-xs text-gray-400 font-semibold uppercase">Short-Term Messages</p>
+                <h2 id="stat-interactions" class="text-2xl font-bold text-white mt-1">0</h2>
+                <p class="text-xs text-gray-500 mt-1">SQLite interactions table</p>
+            </div>
+            <div class="card p-4">
+                <p class="text-xs text-gray-400 font-semibold uppercase">Knowledge Facts</p>
+                <h2 id="stat-facts" class="text-2xl font-bold text-blue-400 mt-1">0</h2>
+                <p class="text-xs text-gray-500 mt-1">Layer 3 Knowledge table</p>
+            </div>
+            <div class="card p-4">
+                <p class="text-xs text-gray-400 font-semibold uppercase">Vector Embeddings</p>
+                <h2 id="stat-vectors" class="text-2xl font-bold text-purple-400 mt-1">0</h2>
+                <p class="text-xs text-gray-500 mt-1">Layer 2 Semantic core</p>
+            </div>
+            <div class="card p-4">
+                <p class="text-xs text-gray-400 font-semibold uppercase">Tools Executed</p>
+                <h2 id="stat-tools" class="text-2xl font-bold text-green-400 mt-1">0</h2>
+                <p class="text-xs text-gray-500 mt-1">Total runtime tool invocations</p>
+            </div>
+        </div>
+
+        <!-- Main Dashboard Panels -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            <!-- Live SSE Execution Feed (2 cols) -->
+            <div class="lg:col-span-2 card p-4 flex flex-col h-[500px]">
+                <div class="flex justify-between items-center mb-3">
+                    <h3 class="text-sm font-semibold text-white uppercase flex items-center gap-2">
+                        <i class="fa-solid fa-terminal text-green-400"></i> Live Execution Telemetry Feed
+                    </h3>
+                    <button onclick="clearFeed()" class="text-xs text-gray-400 hover:text-white">Clear</button>
+                </div>
+                <div id="feed-box" class="feed-box p-3 rounded flex-1 overflow-y-auto space-y-2 border border-gray-800">
+                    <div class="text-gray-500 text-xs">[System] Waiting for telemetry events...</div>
+                </div>
+            </div>
+
+            <!-- Memory Inspector & Self-Healing Radar (1 col) -->
+            <div class="space-y-6">
+                
+                <!-- 4-Layer Memory Inspector -->
+                <div class="card p-4">
+                    <h3 class="text-sm font-semibold text-white uppercase mb-3 flex items-center gap-2">
+                        <i class="fa-solid fa-brain text-purple-400"></i> 4-Layer Memory Inspector
+                    </h3>
+                    <div class="space-y-3 text-xs">
+                        <div class="flex justify-between items-center p-2 bg-gray-900 rounded">
+                            <span>Layer 1: Short-Term History</span>
+                            <span id="layer1-val" class="font-bold text-white">0 rows</span>
+                        </div>
+                        <div class="flex justify-between items-center p-2 bg-gray-900 rounded">
+                            <span>Layer 2: Vector RAG Core</span>
+                            <span id="layer2-val" class="font-bold text-purple-400">0 vectors</span>
+                        </div>
+                        <div class="flex justify-between items-center p-2 bg-gray-900 rounded">
+                            <span>Layer 3: Knowledge Base Facts</span>
+                            <span id="layer3-val" class="font-bold text-blue-400">0 facts</span>
+                        </div>
+                        <div class="flex justify-between items-center p-2 bg-gray-900 rounded">
+                            <span>Layer 4: Conversation Summaries</span>
+                            <span id="layer4-val" class="font-bold text-yellow-400">0 summaries</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Self-Healing Radar -->
+                <div class="card p-4">
+                    <h3 class="text-sm font-semibold text-white uppercase mb-3 flex items-center gap-2">
+                        <i class="fa-solid fa-shield-halved text-green-400"></i> Self-Healing Radar
+                    </h3>
+                    <div class="space-y-2 text-xs">
+                        <div class="flex justify-between">
+                            <span class="text-gray-400">Local Verifier Status:</span>
+                            <span class="text-green-400 font-bold">ACTIVE (0 LLM Calls)</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-400">Planner Bypass Mode:</span>
+                            <span class="text-blue-400 font-bold">ACTIVE</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-400">Recovery Retries:</span>
+                            <span id="recovery-count" class="text-yellow-400 font-bold">0</span>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+        </div>
+
+    </div>
+
+    <script>
+        function updateStats() {
+            fetch('/api/stats')
+                .then(r => r.json())
+                .then(d => {
+                    document.getElementById('stat-interactions').innerText = d.memory?.interactions || 0;
+                    document.getElementById('stat-facts').innerText = d.memory?.facts || 0;
+                    document.getElementById('stat-vectors').innerText = d.memory?.vectors || 0;
+                    document.getElementById('stat-tools').innerText = d.execution?.totalToolsExecuted || 0;
+
+                    document.getElementById('layer1-val').innerText = (d.memory?.interactions || 0) + ' rows';
+                    document.getElementById('layer2-val').innerText = (d.memory?.vectors || 0) + ' vectors';
+                    document.getElementById('layer3-val').innerText = (d.memory?.facts || 0) + ' facts';
+                    document.getElementById('layer4-val').innerText = (d.memory?.summaries || 0) + ' summaries';
+                })
+                .catch(() => {});
+        }
+
+        function clearFeed() {
+            document.getElementById('feed-box').innerHTML = '';
+        }
+
+        function appendFeed(event) {
+            const feed = document.getElementById('feed-box');
+            const item = document.createElement('div');
+            const time = new Date(event.timestamp || Date.now()).toLocaleTimeString();
+            
+            let color = 'text-gray-300';
+            if (event.type === 'agent:state') color = 'text-blue-400 font-bold';
+            if (event.type === 'tool:call') color = 'text-yellow-400';
+            if (event.type === 'tool:result') color = 'text-green-400';
+            if (event.type === 'memory:access') color = 'text-purple-400';
+
+            item.className = `${color} leading-relaxed border-b border-gray-900 pb-1`;
+            item.innerHTML = `<span class="text-gray-600">[${time}]</span> <span class="font-bold">[${event.type}]</span> ${JSON.stringify(event.data)}`;
+
+            feed.appendChild(item);
+            feed.scrollTop = feed.scrollHeight;
+
+            if (event.type === 'agent:state' && event.data?.state) {
+                document.getElementById('agent-state-badge').innerText = event.data.state;
+            }
+        }
+
+        // Connect SSE Stream
+        const evtSource = new EventSource('/api/telemetry/stream');
+
+        evtSource.onopen = function() {
+            const badge = document.getElementById('connection-badge');
+            badge.className = 'px-3 py-1 text-xs rounded-full bg-green-900/50 text-green-400 border border-green-700';
+            badge.innerHTML = '<i class="fa-solid fa-signal mr-1"></i> SSE Connected';
+        };
+
+        evtSource.onmessage = function(e) {
+            try {
+                const data = JSON.parse(e.data);
+                appendFeed(data);
+            } catch(err) {}
+        };
+
+        evtSource.onerror = function() {
+            const badge = document.getElementById('connection-badge');
+            badge.className = 'px-3 py-1 text-xs rounded-full bg-red-900/50 text-red-400 border border-red-700';
+            badge.innerHTML = '<i class="fa-solid fa-triangle-exclamation mr-1"></i> Disconnected';
+        };
+
+        setInterval(updateStats, 3000);
+        updateStats();
+    </script>
+</body>
+</html>

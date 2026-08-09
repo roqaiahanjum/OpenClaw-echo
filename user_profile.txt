@@ -1,0 +1,3 @@
+User prefers concise bullet-point answers and TypeScript.
+I am building OpenClaw Echo as my final-year major project.
+Phase 4A test preference

@@ -1,0 +1,13 @@
+{
+  "watch": ["src"],
+  "ext": "ts,json",
+  "ignore": [
+    "src/**/*.spec.ts",
+    "src/memory/semantic_core.json",
+    "openclaw.db*"
+  ],
+  "execMap": {
+    "ts": "ts-node --transpile-only"
+  },
+  "signal": "SIGINT"
+}

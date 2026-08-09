@@ -30,13 +30,22 @@ async function bootstrap() {
         const server = await startServer();
         console.log("[System] System Online - Railway Deployment Ready");
 
-        const handleShutdown = async () => {
-            await stopServer(server);
+        let isShuttingDown = false;
+        const handleShutdown = async (signal: string) => {
+            if (isShuttingDown) return;
+            isShuttingDown = true;
+            console.log(`\n[System] Signal ${signal} received. Stopping server and releasing ports...`);
+            try {
+                await stopServer(server);
+            } catch (e: any) {
+                console.error("[System] Error during server shutdown:", e.message);
+            }
             process.exit(0);
         };
 
-        process.on("SIGINT", handleShutdown);
-        process.on("SIGTERM", handleShutdown);
+        process.on("SIGINT", () => handleShutdown("SIGINT"));
+        process.on("SIGTERM", () => handleShutdown("SIGTERM"));
+        process.on("SIGHUP", () => handleShutdown("SIGHUP"));
 
         process.on("uncaughtException", (err) => {
             console.error("[Panic] Uncaught Exception:", err);

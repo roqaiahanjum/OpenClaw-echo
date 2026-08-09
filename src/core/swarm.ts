@@ -29,7 +29,7 @@ export class SwarmOrchestrator {
             ];
 
             // Sub-agents run with the cloud model for maximum comprehension
-            const response = await ModelRouter.invoke(taskHistory, "gemini");
+            const response = await ModelRouter.getInstance().invoke(taskHistory, "gemini");
             
             console.log(`[Swarm] ${role} Sub-Agent completed task.`);
             return `--- SUB-AGENT REPORT (${role}) ---\n${response}\n--- END REPORT ---`;
