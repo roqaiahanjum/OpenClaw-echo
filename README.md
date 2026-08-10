@@ -35,6 +35,34 @@
 4. **Cognitive Routing:** ModelRouter (Gemini-2.5-Flash → Groq Llama-3.1-8B)
 5. **Storage:** SQLite Relational Graph + Semantic Vectors
 
+```mermaid
+graph TD
+    User((User)) -->|Telegram Message| TP[Telegram Polling Interface]
+    TP --> Planner[Main Agent / Intent Classifier]
+    
+    Planner -->|Complex Task| SAM[Sub-Agent Manager]
+    
+    subgraph Parallel Execution Layer
+        SAM -->|Delegates| RA[Research Agent]
+        SAM -->|Delegates| CA[Coding Agent]
+        SAM -->|Delegates| BA[Browser Agent]
+    end
+    
+    subgraph 5-Layer Hybrid Memory
+        RA -.->|GraphRAG Traversal| DB[(SQLite Database)]
+        CA -.->|Vector Embeddings| DB
+    end
+    
+    subgraph Waterfall Failover Router
+        RA --> MR[Model Router]
+        CA --> MR
+        MR -->|Primary Route| API1[Google Gemini API]
+        MR -->|Fallback Route| API2[Groq Llama 3 API]
+    end
+    
+    MR -->|Synthesized Output| TP
+```
+
 ---
 
 ## 🚀 Quick Start Guide
