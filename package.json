@@ -13,7 +13,8 @@
     "start": "ts-node --transpile-only src/index.ts",
     "start:ts": "ts-node --transpile-only src/index.ts",
     "lint": "echo Lint skipped - ts-nocheck active on tools.ts",
-    "test": "jest"
+    "test": "jest",
+    "eval": "npx ts-node scratch/eval_metrics.ts"
   },
   "keywords": [
     "ai",
