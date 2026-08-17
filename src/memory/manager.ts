@@ -10,7 +10,16 @@ import { SystemMessage, HumanMessage } from "@langchain/core/messages";
 import { KnowledgeGraphManager } from "./KnowledgeGraphManager";
 import { extractAndStoreTriples } from "./graphExtractor";
 
-dotenv.config();
+// Load .env with absolute path — works from any working directory
+dotenv.config({ 
+  path: path.resolve(__dirname, '../../.env')
+});
+
+// Fallback: also try current directory
+if (!process.env.GOOGLE_API_KEY && !process.env.GEMINI_API_KEY) {
+  dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+}
+
 
 interface SerializedVector {
     content: string;
@@ -47,9 +56,14 @@ export class MemoryManager {
             }
         });
 
+        const apiKey = 
+            process.env.GOOGLE_API_KEY || 
+            process.env.GEMINI_API_KEY || 
+            process.env.GEMINI_KEY;
+
         this.embeddings = new GoogleGenerativeAIEmbeddings({
-            apiKey: process.env.GOOGLE_API_KEY!,
-            modelName: "embedding-001",
+            apiKey: apiKey!,
+            model: 'text-embedding-004',
         });
     }
 
@@ -81,7 +95,7 @@ export class MemoryManager {
                 `);
 
                 this.db.run(`PRAGMA table_info(interactions)`, (err, rows) => {
-                    this.db.run(`ALTER TABLE interactions ADD COLUMN chat_id TEXT DEFAULT 'default'`, () => {});
+                    this.db.run(`ALTER TABLE interactions ADD COLUMN chat_id TEXT DEFAULT 'default'`, () => { });
                 });
 
                 this.db.run(`
@@ -133,14 +147,15 @@ export class MemoryManager {
             }
             console.log("[Memory] 4-Layer Vector Store initialized.");
         } catch (error: any) {
-            console.warn("[Memory] Vector Core initialization failed (Fallback Active):", error.message);
+            console.log('[Memory] Vector search unavailable — using SQLite only.');
+            this.vectorStore = null;
         }
     }
 
     // --- FACT MANAGEMENT (DEDUPLICATION & CONFLICT RESOLUTION) ---
 
     public async saveFact(category: string, key: string, value: string, confidence: number = 1.0): Promise<boolean> {
-        await this.initialize().catch(() => {});
+        await this.initialize().catch(() => { });
         const id = `fact_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
 
         const existing: KnowledgeFact | null = await new Promise((resolve) => {
@@ -149,8 +164,14 @@ export class MemoryManager {
 
         if (existing) {
             if (existing.value.trim().toLowerCase() === value.trim().toLowerCase()) {
-                console.log(`[Memory] Fact deduplicated (identical value exists): [${category}] ${key} = "${value}"`);
-                return true;
+                console.log(`[Memory] Fact deduplicated (identical value exists). Updating timestamp: [${category}] ${key}`);
+                return new Promise((resolve) => {
+                    this.db.run(
+                        `UPDATE knowledge SET timestamp = CURRENT_TIMESTAMP WHERE key = ?`,
+                        [key],
+                        (err) => resolve(!err)
+                    );
+                });
             }
             console.log(`[Memory] Fact updated (conflict resolved): [${category}] ${key}: "${existing.value}" -> "${value}"`);
             return new Promise((resolve) => {
@@ -182,9 +203,14 @@ export class MemoryManager {
     public async getAllFacts(): Promise<KnowledgeFact[]> {
         await this.initialize().catch(() => {});
         return new Promise((resolve) => {
-            this.db.all<KnowledgeFact>(`SELECT * FROM knowledge ORDER BY timestamp DESC`, [], (err, rows) => {
-                if (err || !rows) resolve([]);
-                else resolve(rows);
+            this.db.all<KnowledgeFact>(`SELECT * FROM knowledge ORDER BY category, confidence DESC`, [], (err, rows) => {
+                if (err || !rows) {
+                    resolve([]);
+                } else {
+                    // Filter out any rows with missing required fields
+                    const validRows = (rows as any).filter((r: any) => r && r.key && r.value && r.category);
+                    resolve(validRows);
+                }
             });
         });
     }
@@ -249,7 +275,7 @@ export class MemoryManager {
     // --- MEMORY SEARCH ENGINE ---
 
     public async searchMemory(query: string): Promise<string> {
-        await this.initialize().catch(() => {});
+        await this.initialize().catch(() => { });
         const results: string[] = [];
 
         const facts = await this.getAllFacts();
@@ -280,7 +306,7 @@ export class MemoryManager {
                     results.push(`[SEMANTIC_MEMORY MATCHES]\n` + vecDocs.map(d => docToText(d)).join("\n---\n"));
                 }
             } catch (e: any) {
-                console.warn("[Memory] Vector search error in searchMemory (Fallback Active):", e.message);
+                console.log('[Memory] Vector search unavailable — using SQLite only.');
             }
         }
 
@@ -306,7 +332,7 @@ export class MemoryManager {
                 if (rows.length >= 50) {
                     const transcript = rows.map(r => `User: ${r.user_msg}\nAgent: ${r.agent_res}`).join("\n\n");
                     const prompt = `Summarize the key decisions, user facts, and topics discussed in this conversation transcript concise bullet points:\n\n${transcript}`;
-                    
+
                     const router = ModelRouter.getInstance();
                     const summaryRes = await router.invoke([
                         new SystemMessage("You are an expert conversation summarizer."),
@@ -375,7 +401,7 @@ export class MemoryManager {
             const ranked = this.rankContentByRelevance(userInput, results.map(r => ({ text: r.pageContent })));
             return ranked.slice(0, 8).map(r => r.text).join("\n---\n");
         } catch (e: any) {
-            console.warn("[Memory] Vector embedding/search offline (Fallback to SQLite Facts):", e.message);
+            console.log('[Memory] Vector search unavailable — using SQLite only.');
             return "";
         }
     }
@@ -383,7 +409,7 @@ export class MemoryManager {
     // --- INTERACTION & CONTEXT ASSEMBLY ---
 
     public async addInteraction(arg1: string, arg2: string, arg3: string = "default"): Promise<void> {
-        await this.initialize().catch(() => {});
+        await this.initialize().catch(() => { });
         const id = `msg_${Date.now()}`;
 
         let userInput = arg1;
@@ -450,7 +476,7 @@ export class MemoryManager {
 
     public async getContext(arg1: string, arg2: string = "default"): Promise<string> {
         try {
-            await this.initialize().catch(() => {});
+            await this.initialize().catch(() => { });
 
             let userInput = arg1;
             let chatId = arg2;
@@ -528,7 +554,7 @@ export class MemoryManager {
     }
 
     public async ingestDocument(text: string, source: string): Promise<void> {
-        await this.initialize().catch(() => {});
+        await this.initialize().catch(() => { });
         if (!this.vectorStore) return;
         try {
             console.log(`[Memory] Ingesting document into vector store from: ${source}`);
@@ -546,7 +572,7 @@ export class MemoryManager {
     }
 
     public async clearHistory(chatId: string = "default"): Promise<void> {
-        await this.initialize().catch(() => {});
+        await this.initialize().catch(() => { });
         return new Promise((resolve, reject) => {
             this.db.run(`DELETE FROM interactions WHERE chat_id = ?`, [chatId], async (err) => {
                 if (err) reject(err);
@@ -559,7 +585,7 @@ export class MemoryManager {
     }
 
     public async clearAllMemory(): Promise<void> {
-        await this.initialize().catch(() => {});
+        await this.initialize().catch(() => { });
         return new Promise((resolve, reject) => {
             this.db.serialize(async () => {
                 this.db.run(`DELETE FROM interactions;`);
@@ -573,7 +599,7 @@ export class MemoryManager {
 
                 try {
                     await fs.unlink(this.storagePath);
-                } catch (e) {}
+                } catch (e) { }
 
                 console.log("[Memory] All memory layers wiped cleanly.");
                 resolve();
@@ -589,6 +615,19 @@ export class MemoryManager {
         const vectors = this.vectorStore ? this.vectorStore.memoryVectors.length : 0;
 
         return { interactions, facts, summaries, vectors };
+    }
+
+    public async checkHealth(): Promise<{ sqlite: { status: string; details: string }; chroma: { status: string; details: string } }> {
+        const stats = await this.getStats().catch(() => ({ vectors: 0 }));
+        const sqliteStatus = this.db ? "connected" : "error";
+        const sqliteDetails = this.db ? "SQLite Database Connected." : "SQLite Database Connection failed.";
+        const chromaStatus = this.vectorStore ? "connected" : "offline";
+        const chromaDetails = this.vectorStore ? `Vector store active with ${stats.vectors} semantic vectors.` : "Vector store offline.";
+
+        return {
+            sqlite: { status: sqliteStatus, details: sqliteDetails },
+            chroma: { status: chromaStatus, details: chromaDetails }
+        };
     }
 
     private async saveVectorStore(): Promise<void> {

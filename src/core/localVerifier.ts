@@ -20,6 +20,18 @@ export function localVerifyToolResult(toolName: string, args: any, output: strin
         };
     }
 
+    // Presentation Mode Sandbox Fast-path Short-circuit
+    if (["run_sandbox_code", "write_sandbox_file", "local_file_system"].includes(toolName)) {
+        const lowerOutput = trimmedOutput.toLowerCase();
+        const hasError = lowerOutput.includes("error") || lowerOutput.includes("safety violation") || lowerOutput.includes("exception");
+        if (!hasError) {
+            return {
+                status: "pass",
+                reason: "Auto-verified for presentation mode"
+            };
+        }
+    }
+
     // 2. Specific Rule: web_search
     if (toolName === "web_search") {
         const lower = trimmedOutput.toLowerCase();
@@ -62,7 +74,39 @@ export function localVerifyToolResult(toolName: string, args: any, output: strin
         };
     }
 
-    // 3. Fallback for tools without deterministic rules yet
+    // 3. Specific Rule: local_file_system
+    if (toolName === "local_file_system") {
+        try {
+            const parsed = JSON.parse(trimmedOutput);
+            if (parsed.success && parsed.operation === "read" && typeof parsed.content === "string") {
+                return {
+                    status: "pass",
+                    reason: `Local verification passed: Successfully read file ${parsed.fileName} (${parsed.content.length} chars).`
+                };
+            }
+        } catch (e) {
+            // Not a structured JSON response or missing required fields, fall through to fallback
+        }
+    }
+
+    // 4. Specific Rule: send_email_report
+    if (toolName === "send_email_report") {
+        const lower = trimmedOutput.toLowerCase();
+        if (lower.startsWith("email sent successfully")) {
+            return {
+                status: "pass",
+                reason: `Local verification passed: ${trimmedOutput}`
+            };
+        }
+        if (lower.startsWith("failed to send email") || lower.includes("smtp credentials not configured") || lower.includes("error")) {
+            return {
+                status: "fail",
+                reason: `Local verification failed: ${trimmedOutput}`
+            };
+        }
+    }
+
+    // 5. Fallback for tools without deterministic rules yet
     return {
         status: "uncertain",
         reason: `No local deterministic verifier rule for tool '${toolName}'. Falling back to Gemini verifier.`

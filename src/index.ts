@@ -1,5 +1,16 @@
 // @ts-nocheck
-import "dotenv/config";
+import dotenv from 'dotenv';
+import path from 'path';
+
+// Load .env with absolute path — works from any working directory
+dotenv.config({ 
+  path: path.resolve(__dirname, '../../.env')
+});
+
+// Fallback: also try current directory
+if (!process.env.GOOGLE_API_KEY && !process.env.GEMINI_API_KEY) {
+  dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+}
 
 // ✅ Fix for Railway deployment
 if (typeof File === "undefined") {
@@ -16,8 +27,19 @@ async function bootstrap() {
     console.log("    🚀 OPENCLAW ECHO: ACTIVATE 🚀        ");
     console.log("-----------------------------------------");
 
-    const requiredEnv = ["TELEGRAM_TOKEN", "GOOGLE_API_KEY"];
-    const missingEnv = requiredEnv.filter(key => !process.env[key]);
+    console.log('[Startup] Environment Check:');
+    console.log('  GOOGLE_API_KEY:', (process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || process.env.GEMINI_KEY) ? '✅ Loaded' : '❌ MISSING');
+    console.log('  GROQ_API_KEY:  ', (process.env.GROQ_API_KEY || process.env.GROQ_KEY) ? '✅ Loaded' : '⚠️  Missing (fallback unavailable)');
+    console.log('  TELEGRAM_TOKEN:', process.env.TELEGRAM_TOKEN || process.env.TELEGRAM_BOT_TOKEN ? '✅ Loaded' : '❌ MISSING');
+    console.log('  TAVILY_API_KEY:', process.env.TAVILY_API_KEY ? '✅ Loaded' : '⚠️  Missing (web search disabled)');
+    console.log('  SMTP_USER:     ', process.env.SMTP_USER ? '✅ Loaded' : '⚠️  Missing (email disabled)');
+
+    const hasGoogleKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || process.env.GEMINI_KEY;
+    const hasTelegramToken = process.env.TELEGRAM_TOKEN || process.env.TELEGRAM_BOT_TOKEN;
+
+    const missingEnv: string[] = [];
+    if (!hasGoogleKey) missingEnv.push("GOOGLE_API_KEY");
+    if (!hasTelegramToken) missingEnv.push("TELEGRAM_TOKEN");
 
     if (missingEnv.length > 0) {
         console.error(`[Fatal] Critical environment variables missing: ${missingEnv.join(", ")}`);

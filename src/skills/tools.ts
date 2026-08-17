@@ -8,6 +8,7 @@ import { promisify } from "util";
 import { DashboardLogger } from "../core/logger";
 import { Telemetry } from "../core/telemetry";
 import { SubAgentRunner } from "../core/subagent";
+import { Diplomat } from "../core/diplomat";
 
 const execAsync = promisify(exec);
 
@@ -136,7 +137,12 @@ export const localFileSystemTool = tool(
                 if (stats.size > 100000) return "Error: File size exceeds 100KB limit for safe reading.";
                 
                 const content = await fs.readFile(resolvedPath, "utf-8");
-                return content;
+                return JSON.stringify({
+                    success: true,
+                    operation: "read",
+                    fileName: path.basename(resolvedPath),
+                    content: content
+                }, null, 2);
             }
 
             return "Invalid action.";
@@ -554,13 +560,28 @@ export const delegateTaskTool = tool(
 );
 
 export const sendEmailReportTool = tool(
-    async ({ to, subject }: { to: string, subject: string }) => {
-        return `Email queued for ${to}: ${subject}`;
+    async ({ to, subject, body }: { to: string; subject: string; body: string }) => {
+        try {
+            await Diplomat.sendReport({ to, subject, body });
+            return `Email sent successfully to ${to} with subject "${subject}".`;
+        } catch (error: any) {
+            const rawMsg = error.message || String(error);
+            const pass = process.env.SMTP_PASS;
+            const safeMsg = pass && pass.length > 0 && rawMsg.includes(pass)
+                ? rawMsg.replace(new RegExp(pass, "g"), "*****")
+                : rawMsg;
+            console.error(`[send_email_report] Error sending email to ${to}: ${safeMsg}`);
+            return `Failed to send email report to ${to}: ${safeMsg}`;
+        }
     },
     {
         name: "send_email_report",
         description: "Sends email reports via SMTP.",
-        schema: z.object({ to: z.string(), subject: z.string() })
+        schema: z.object({
+            to: z.string().email().describe("Recipient email address"),
+            subject: z.string().describe("Subject of the email"),
+            body: z.string().describe("Body content of the email report")
+        })
     }
 );
 

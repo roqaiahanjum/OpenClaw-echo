@@ -1,3 +1,13 @@
 User prefers concise bullet-point answers and TypeScript.
 I am building OpenClaw Echo as my final-year major project.
 Phase 4A test preference
+Preferences: best friend: Saheer Nadaf
+Name: Roqaiah
+Preferences: JavaScript, TypeScript
+Name: Roqaiah
+Name: test_key
+Preferences: test_value_openclaw
+Name: test_key
+Preferences: test_value_openclaw
+Name: test_key
+Preferences: test_value_openclaw

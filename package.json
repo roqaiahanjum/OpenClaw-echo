@@ -10,10 +10,12 @@
     "predev": "node scripts/kill-port.js",
     "dev": "nodemon src/index.ts",
     "build": "cd dashboard && npm install && npm run build",
-    "start": "ts-node --transpile-only src/index.ts",
+    "start": "node -r ts-node/register src/index.ts",
+    "start:bg": "node -r ts-node/register src/index.ts >> logs/openclaw.log 2>&1",
     "start:ts": "ts-node --transpile-only src/index.ts",
     "lint": "echo Lint skipped - ts-nocheck active on tools.ts",
     "test": "jest",
+    "test:tools": "npx ts-node --transpile-only scratch/test_all_tools.ts",
     "eval": "npx ts-node scratch/eval_metrics.ts"
   },
   "keywords": [

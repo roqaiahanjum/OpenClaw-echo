@@ -3,6 +3,30 @@ import { KnowledgeGraphManager } from "./KnowledgeGraphManager";
 import { ModelRouter } from "../core/router";
 import { SystemMessage, HumanMessage } from "@langchain/core/messages";
 
+function safeParseGraphData(raw: string): any[] {
+  try {
+    // Try direct JSON parse first
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed;
+    if (typeof parsed === 'object') return [parsed];
+    return [];
+  } catch {
+    try {
+      // Try to extract JSON array from mixed text
+      const match = raw.match(/\[[\s\S]*\]/);
+      if (match) {
+        const parsed = JSON.parse(match[0]);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {
+      // ignore
+    }
+    // Return empty array — do not crash
+    console.warn('[GraphExtractor] Could not parse LLM output as JSON. Skipping.');
+    return [];
+  }
+}
+
 export class GraphExtractor {
     private graph: KnowledgeGraphManager;
 
@@ -66,11 +90,7 @@ export class GraphExtractor {
             const router = ModelRouter.getInstance();
             if (router.isInFallbackMode()) return 0;
 
-            const prompt = `Extract knowledge graph triples (Subject, Predicate, Object) from the user message.
-Return ONLY valid JSON array matching this format without markdown code blocks:
-[
-  { "subject": "User", "predicate": "LIKES", "object": "TypeScript" }
-]`;
+            const prompt = `You are a background memory extraction tool. Your ONLY job is to extract knowledge triples from the conversation. DO NOT answer the user's prompt. DO NOT write code. You must output ONLY a raw JSON array of arrays (e.g., [["Subject", "Predicate", "Object"]]), with no markdown, no explanation, and no code blocks.`;
 
             const messages = [
                 new SystemMessage(prompt),
@@ -79,14 +99,39 @@ Return ONLY valid JSON array matching this format without markdown code blocks:
 
             const res = await router.invoke(messages, "graph_extractor");
             let raw = (res.content as string) || "";
-            raw = raw.replace(/```json/g, "").replace(/```/g, "").trim();
+            
+            // Robust cleaning helper to extract valid JSON blocks
+            let cleaned = raw.trim();
+            cleaned = cleaned.replace(/```json/gi, "").replace(/```/g, "").trim();
 
-            const triples = JSON.parse(raw);
+            const markdownRegex = /```(?:json)?\s*([\s\S]*?)\s*```/;
+            const match = cleaned.match(markdownRegex);
+            if (match) {
+                cleaned = match[1];
+            }
+
+            const arrayMatch = cleaned.match(/(\[\s*[\s\S]*?\s*\])/);
+            if (arrayMatch) {
+                cleaned = arrayMatch[1];
+            } else {
+                const objectMatch = cleaned.match(/(\{\s*[\s\S]*?\s*\})/);
+                if (objectMatch) {
+                    cleaned = objectMatch[1];
+                }
+            }
+            cleaned = cleaned.trim();
+
+            let triples: any[] = [];
+            triples = safeParseGraphData(cleaned);
+
             if (!Array.isArray(triples)) return 0;
 
             let added = 0;
             for (const t of triples) {
-                if (t.subject && t.predicate && t.object) {
+                if (Array.isArray(t) && t.length >= 3) {
+                    const ok = await this.graph.addTriple(t[0], t[1], t[2]);
+                    if (ok) added++;
+                } else if (t && t.subject && t.predicate && t.object) {
                     const ok = await this.graph.addTriple(t.subject, t.predicate, t.object);
                     if (ok) added++;
                 }

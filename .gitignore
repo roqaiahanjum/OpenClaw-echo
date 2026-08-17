@@ -8,5 +8,8 @@ build/
 npm-debug.log*
 .DS_Store
 *.log
+logs/
+.tsbuildinfo
 src/sandbox/
 src/memory/semantic_core.json
+

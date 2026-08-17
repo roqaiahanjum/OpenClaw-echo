@@ -39,18 +39,63 @@ const WEBHOOK_PATH = "/api/webhook";
 
 let activePersonality: PersonalityMode = "standard";
 
+async function safeSend(ctx: any, text: string, options: any = {}) {
+    const MAX = 3800;
+    if (text.length <= MAX) {
+        try {
+            await ctx.reply(text, { parse_mode: 'Markdown', ...options });
+        } catch {
+            await ctx.reply(text, options); // fallback: no markdown
+        }
+        return;
+    }
+    // Split into chunks
+    const chunks = [];
+    let current = '';
+    for (const line of text.split('\n')) {
+        if ((current + '\n' + line).length > MAX) {
+            chunks.push(current);
+            current = line;
+        } else {
+            current += (current ? '\n' : '') + line;
+        }
+    }
+    if (current) chunks.push(current);
+    
+    for (const chunk of chunks) {
+        try {
+            await ctx.reply(chunk, { parse_mode: 'Markdown', ...options });
+        } catch {
+            await ctx.reply(chunk, options);
+        }
+        await new Promise(r => setTimeout(r, 300)); // small delay between chunks
+    }
+}
+
 const invokeWithTimeout = async (messages: any[], mode?: string, options?: any) => {
-    const timeoutMs = 35000;
-    const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('LLM_TIMEOUT')), timeoutMs)
-    );
-    return Promise.race([
-        ModelRouter.getInstance().invokeWithRetry(messages, mode, options),
-        timeoutPromise,
-    ]);
+    const controller = new AbortController();
+    const timeoutMs = 55000;
+    let timer: NodeJS.Timeout;
+    const timeoutPromise = new Promise((_, reject) => {
+        timer = setTimeout(() => {
+            controller.abort();
+            reject(new Error('LLM_TIMEOUT'));
+        }, timeoutMs);
+    });
+
+    const mergedOptions = { ...options, signal: controller.signal };
+
+    try {
+        return await Promise.race([
+            ModelRouter.getInstance().invokeWithRetry(messages, mode, mergedOptions),
+            timeoutPromise,
+        ]);
+    } finally {
+        clearTimeout(timer!);
+    }
 };
 
-async function executeAutonomousFlow(input: string, chatId: string, isPhoto: boolean, replyFn: (content: string) => Promise<any>, photoLink?: string, isRetry: boolean = false) {
+export const executeAutonomousFlow = async (input: string, chatId?: string | number, isPhoto?: boolean, replyFn?: any, photoLink?: string, isRetry?: boolean) => {
     try {
         const persona = PERSONALITIES[activePersonality];
         DashboardLogger.log(`[Persona] Active: ${persona.label}`);
@@ -83,7 +128,8 @@ async function executeAutonomousFlow(input: string, chatId: string, isPhoto: boo
             const replyText = (response.content as string) || "Hello! How can I help you today?";
 
             await replyFn(replyText);
-            await memory.addInteraction(input, replyText, chatId?.toString() || 'default');
+            memory.addInteraction(input, replyText, chatId?.toString() || 'default')
+                .catch(err => console.warn("[Memory] Background interaction persistence warning:", err.message));
             Telemetry.broadcast("status_update", { event: "flow_complete" });
             return;
         }
@@ -128,7 +174,8 @@ ${context}`;
             }
 
             await replyFn(replyText);
-            await memory.addInteraction(input, replyText, chatId?.toString() || 'default');
+            memory.addInteraction(input, replyText, chatId?.toString() || 'default')
+                .catch(err => console.warn("[Memory] Background interaction persistence warning:", err.message));
             Telemetry.broadcast("status_update", { event: "flow_complete" });
             return;
         }
@@ -153,7 +200,7 @@ ${context}`;
 
         if (isMultiAgentTask && !isPhoto) {
             DashboardLogger.log(`[OmniSubAgent] MULTI-AGENT DELEGATION DETECTED — Dispatching via SubAgentManager & ACP Protocol.`);
-            const acpTasks = decomposeIntoACPTasks(input, plan || undefined);
+            const acpTasks = decomposeIntoACPTasks(input, plan ? JSON.stringify(plan) : undefined);
             const workerResults = await SubAgentManager.getInstance().delegateTasksParallel(acpTasks);
 
             const finalReply = workerResults.map(res => {
@@ -163,7 +210,8 @@ ${context}`;
 
             const finalResponse = finalReply || "Sub-agent delegation completed successfully.";
             await replyFn(finalResponse);
-            await memory.addInteraction(input, finalResponse, chatId?.toString() || 'default');
+            memory.addInteraction(input, finalResponse, chatId?.toString() || 'default')
+                .catch(err => console.warn("[Memory] Background interaction persistence warning:", err.message));
             Telemetry.broadcast("status_update", { event: "flow_complete" });
             return;
         }
@@ -176,7 +224,16 @@ ${context}`;
             ];
         }
 
-        let systemPromptText = `You are OpenClaw Echo, a helpful AI assistant.
+        let systemPromptText = `CRITICAL INSTRUCTION:
+Before using ANY tool, check your memory context above.
+If the answer exists in KNOWN FACTS or RECENT HISTORY,
+answer directly from memory WITHOUT calling any tool.
+Only use tools when memory does not have the answer.
+Never use local_file_system to answer questions about
+your own identity, project name, or user information —
+this information is already in your memory context.
+
+You are OpenClaw Echo, a helpful AI assistant.
 Be brief and direct. Max 2-3 sentences.
 Context: ${context}`;
         if (planText) {
@@ -191,7 +248,9 @@ Context: ${context}`;
         DashboardLogger.log(`[Flow] Step 4: Executing autonomous cycle...`);
         let finalResponse = "";
         let iterations = 0;
-        const MAX_ITERATIONS = 5;
+        const MAX_ITERATIONS = 15;
+        let recoveryAttempts = 0;
+        const MAX_RECOVERY_ATTEMPTS = 2;
 
         while (iterations < MAX_ITERATIONS) {
             const logic = isPhoto ? "image_analysis" : "complex";
@@ -204,7 +263,13 @@ Context: ${context}`;
                     const tool = SkillRegistry.getToolByName(toolCall.name);
                     if (tool) {
                         DashboardLogger.log(`[Status] Executing ${toolCall.name}...`);
-                        const output = await tool.invoke(toolCall.args);
+                        let output: string;
+                        try {
+                            output = String(await tool.invoke(toolCall.args));
+                        } catch (toolErr: any) {
+                            output = `Error executing tool '${toolCall.name}': ${toolErr.message || toolErr}`;
+                            console.error(`[Tool Error] Failed to execute ${toolCall.name}:`, toolErr);
+                        }
 
                         // ◄── HYBRID VERIFIER (LOCAL + GEMINI FALLBACK) ──►
                         const localCheck = localVerifyToolResult(toolCall.name, toolCall.args, String(output));
@@ -225,6 +290,12 @@ Context: ${context}`;
                         if (!verification.success) {
                             console.warn(`[Verifier] Step failed verification: ${verification.reason}`);
 
+                            if (recoveryAttempts >= MAX_RECOVERY_ATTEMPTS) {
+                                console.warn('[Recovery] Max recovery attempts reached — breaking loop.');
+                                finalOutput += `\n\n[RECOVERY SKIPPED: Max recovery attempts (${MAX_RECOVERY_ATTEMPTS}) reached.]`;
+                            } else {
+                            recoveryAttempts++;
+
                             // ◄── SELF-HEALING RECOVERY LAYER ──►
                             const availableToolNames = tools.map((t: any) => t.name);
                             const recovery = await determineRecoveryStrategy({
@@ -234,7 +305,7 @@ Context: ${context}`;
                                 output: String(output),
                                 failureReason: verification.reason,
                                 availableTools: availableToolNames,
-                                attemptCount: 1
+                                attemptCount: recoveryAttempts
                             });
 
                             DashboardLogger.log(`[Recovery] Strategy selected: ${recovery.strategy} (${recovery.reason})`);
@@ -268,8 +339,9 @@ Context: ${context}`;
                                         finalOutput += `\n\n[RECOVERY ATTEMPTED: Tried ${targetToolName} via ${recovery.strategy}. Reason: ${reVerification.reason}]`;
                                     }
                                 }
-                            } else {
-                                finalOutput += `\n\n[VERIFICATION NOTE: This result may not fully satisfy the goal. Reason: ${verification.reason}. Recovery recommendation: ${recovery.strategy} - ${recovery.reason}]`;
+                                } else {
+                                    finalOutput += `\n\n[VERIFICATION NOTE: This result may not fully satisfy the goal. Reason: ${verification.reason}. Recovery recommendation: ${recovery.strategy} - ${recovery.reason}]`;
+                                }
                             }
                         } else {
                             console.log(`[Verifier] Step passed verification.`);
@@ -291,7 +363,8 @@ Context: ${context}`;
         await replyFn(finalResponse);
 
         DashboardLogger.log(`[Flow] Step 6: Persisting interaction across 4 memory layers...`);
-        await memory.addInteraction(input, finalResponse, chatId?.toString() || 'default');
+        memory.addInteraction(input, finalResponse, chatId?.toString() || 'default')
+            .catch(err => console.warn("[Memory] Background interaction persistence warning:", err.message));
 
         Telemetry.broadcast("status_update", { event: "flow_complete" });
 
@@ -366,25 +439,97 @@ async function telegramHandler(ctx: Context) {
         }
     }
 
+    // 1. Strict Fast-Path Intent Classification
+    const isGreeting = /^(hi|hello|hey|how are you|ping|test)[\s!.,?]*$/i.test(input.trim());
+    if (isGreeting && !isPhoto) {
+        await ctx.reply("Hello! I am OpenClaw Echo. My tools and agents are online. How can I help you today?");
+        return;
+    }
+
     // Start typing indicator
     await ctx.sendChatAction('typing').catch(() => { });
     const typingInterval = setInterval(() => {
         ctx.sendChatAction('typing').catch(() => { });
     }, 4000);
 
+    // 2. Send status message
+    let statusMessageId: number | null = null;
     try {
-        await executeAutonomousFlow(
+        const statusMsg = await ctx.reply("⚙️ _Orchestrator is classifying intent and building a plan..._", { parse_mode: "Markdown" });
+        statusMessageId = statusMsg.message_id;
+    } catch (e) {
+        console.error("Failed to send initial status message:", e);
+    }
+
+    try {
+        let isFirstReply = true;
+
+        // FIX 4B: 60-second flow timeout
+        const flowTimeout = new Promise<string>((resolve) =>
+            setTimeout(() => resolve(
+                "⏳ I'm still working on your request — this is a complex task and I need a bit more time. Please send your message again and I'll try a faster approach."
+            ), 180000)
+        );
+
+        const replyHandler = async (finalResponse: string) => {
+                if (isFirstReply && statusMessageId !== null) {
+                    isFirstReply = false;
+                    try {
+                        await ctx.telegram.editMessageText(
+                            ctx.chat?.id,
+                            statusMessageId,
+                            undefined,
+                            finalResponse.length <= 3800 ? finalResponse : finalResponse.substring(0, 3800),
+                            { parse_mode: "Markdown" }
+                        );
+                        if (finalResponse.length > 3800) {
+                            await safeSend(ctx, finalResponse.substring(3800));
+                        }
+                    } catch (err: any) {
+                        const errMsg = err.message || "";
+                        if (errMsg.includes("message is not modified")) {
+                            // Ignore
+                        } else if (errMsg.includes("can't parse entities")) {
+                            try {
+                                await ctx.telegram.editMessageText(
+                                    ctx.chat?.id,
+                                    statusMessageId,
+                                    undefined,
+                                    finalResponse.length <= 3800 ? finalResponse : finalResponse.substring(0, 3800)
+                                );
+                                if (finalResponse.length > 3800) {
+                                    await safeSend(ctx, finalResponse.substring(3800));
+                                }
+                            } catch (innerErr) {
+                                await safeSend(ctx, finalResponse);
+                            }
+                        } else {
+                            await safeSend(ctx, finalResponse);
+                        }
+                    }
+                } else {
+                    await safeSend(ctx, finalResponse);
+                }
+        };
+
+        const flowPromise = executeAutonomousFlow(
             input,
             String(ctx.chat?.id),
             isPhoto,
-            async (content) => {
-                const chunks = splitMessage(content);
-                for (const chunk of chunks) {
-                    await ctx.reply(chunk);
-                }
-            },
+            replyHandler,
             photoLink
         );
+
+        // Race: flow vs 60s timeout
+        const timeoutResult = await Promise.race([
+            flowPromise.then(() => null),
+            flowTimeout
+        ]);
+
+        if (timeoutResult !== null) {
+            // Flow timed out — send timeout message
+            await replyHandler(timeoutResult);
+        }
     } finally {
         clearInterval(typingInterval);
     }
@@ -425,10 +570,43 @@ bot.command("facts", async (ctx) => {
             await ctx.reply("ℹ️ No knowledge facts stored yet.");
             return;
         }
-        const factsText = facts.map(f => `• *[${f.category}]* ${f.key}: ${f.value}`).join("\n");
-        await ctx.reply(`📚 *Knowledge Base Facts*\n\n${factsText}`, { parse_mode: "Markdown" });
-    } catch (e: any) {
-        await ctx.reply("❌ Error fetching facts.");
+
+        const lines = facts
+            .map(f => `• *${f.key}*: ${f.value} [${f.category}]`)
+            .join("\n");
+
+        const replyFn = async (text: string, title?: string) => {
+            const fullText = title ? `${title}\n\n${text}` : text;
+            try {
+                await ctx.reply(fullText, { parse_mode: "Markdown" });
+            } catch (err: any) {
+                console.warn("[Facts Command] Markdown reply failed, falling back to plain text:", err.message);
+                await ctx.reply(fullText);
+            }
+        };
+
+        const MAX_LENGTH = 3800;
+        if (lines.length <= MAX_LENGTH) {
+            await replyFn(lines, `💡 *What I know (${facts.length} facts):*`);
+        } else {
+            await replyFn(`💡 *What I know (${facts.length} facts) — sending in parts:*`);
+            
+            let chunk = "";
+            for (const line of lines.split("\n")) {
+                if ((chunk + "\n" + line).length > MAX_LENGTH) {
+                    await replyFn(chunk);
+                    chunk = line;
+                } else {
+                    chunk += (chunk ? "\n" : "") + line;
+                }
+            }
+            if (chunk) {
+                await replyFn(chunk);
+            }
+        }
+    } catch (error: any) {
+        console.error("[Facts Command] Error:", error);
+        await ctx.reply(`❌ Error fetching facts: ${error.message}`);
     }
 });
 
@@ -779,8 +957,8 @@ export const stopServer = async (server: any) => {
                 await bot.stop("SIGINT");
             } catch (e) { }
         }
-        if (memory && typeof memory.close === "function") {
-            await memory.close();
+        if (memory && typeof (memory as any).close === "function") {
+            await (memory as any).close();
         }
     } catch (error: any) {
         console.error("[System] Error during shutdown:", error.message);

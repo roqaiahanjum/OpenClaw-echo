@@ -33,6 +33,16 @@ export async function determineRecoveryStrategy(input: RecoveryInput): Promise<R
     }
 
     try {
+        const { SkillRegistry } = await import("../skills/registry");
+        const availableToolDetails = input.availableTools.map(tName => {
+            const tool = SkillRegistry.getToolByName(tName);
+            if (tool && tool.schema) {
+                // Return schema shape if possible, or just the description
+                return `- ${tName}: ${tool.description}`;
+            }
+            return `- ${tName}`;
+        }).join("\n");
+
         const router = ModelRouter.getInstance();
         const recoveryPrompt = `You are the OpenClaw Self-Healing Recovery Engine.
 A tool execution failed verification. Analyze the failure and recommend a recovery strategy.
@@ -41,7 +51,8 @@ User Goal: ${input.userGoal}
 Failed Tool: ${input.toolName}
 Failed Tool Args: ${JSON.stringify(input.toolArgs)}
 Failure Reason: ${input.failureReason}
-Available Tools: ${input.availableTools.join(", ")}
+Available Tools:
+${availableToolDetails}
 
 Choose ONE strategy from:
 1. "modify_args": Adjust arguments for the same tool.
@@ -49,6 +60,8 @@ Choose ONE strategy from:
 3. "retry_same": Retry the same tool with exact same arguments.
 4. "replan": Ask the agent to re-plan its approach.
 5. "abort": Stop attempting recovery.
+
+IMPORTANT: If choosing "alternative_tool" or "modify_args", you MUST provide valid arguments matching the tool's schema. Do NOT invent or omit required fields (e.g. do not add 'content' to run_sandbox_code which only takes 'fileName').
 
 Return ONLY valid JSON matching this schema, without markdown formatting or extra text:
 {

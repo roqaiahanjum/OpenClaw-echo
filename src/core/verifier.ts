@@ -14,7 +14,8 @@ export async function verifyStepResult(userGoal: string, actionName: string, out
     try {
         const router = ModelRouter.getInstance();
         const verifierPrompt = `You are the OpenClaw Output Verifier.
-Evaluate if the tool output successfully addresses the step goal.
+Evaluate if the tool output successfully executed its specific action. 
+NOTE: The User Goal may require multiple tools to fully resolve. Do NOT fail the tool if it only completed a partial step towards the overall goal, as long as the tool's specific action succeeded.
 User Goal: ${userGoal}
 Tool Executed: ${actionName}
 

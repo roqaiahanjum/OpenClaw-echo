@@ -1,0 +1,4 @@
+[
+  { "id": "groq-llama-3.1-8b", "name": "Groq Llama 3.1 8B", "provider": "groq", "modelName": "llama-3.1-8b-instant" },
+  { "id": "gemini-flash-2.5", "name": "Gemini 2.5 Flash", "provider": "gemini", "modelName": "gemini-2.5-flash" }
+]
