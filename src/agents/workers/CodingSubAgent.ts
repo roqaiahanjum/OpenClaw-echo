@@ -4,6 +4,7 @@ import { ModelRouter } from "../../core/router";
 import { SystemMessage, HumanMessage } from "@langchain/core/messages";
 import * as path from "path";
 import * as fs from "fs/promises";
+import { sanitizeSandboxCode } from "../../skills/tools";
 
 export class CodingSubAgent implements WorkerAgent {
     public readonly agentType = "coding" as const;
@@ -41,7 +42,7 @@ Return ONLY executable code inside markdown blocks (\`\`\`typescript ... \`\`\`)
                 generatedCode = this.generateFallbackCode(task.taskDescription);
             }
 
-            // Ensure clean markdown fence formatting
+            // Ensure clean markdown fence formatting for display
             if (!generatedCode.includes("```")) {
                 generatedCode = `\`\`\`typescript\n${generatedCode}\n\`\`\``;
             }
@@ -57,7 +58,8 @@ Return ONLY executable code inside markdown blocks (\`\`\`typescript ... \`\`\`)
                 await fs.mkdir(sandboxDir, { recursive: true });
                 const fileName = `generated_${task.taskId.replace(/[^a-zA-Z0-9_]/g, "")}.ts`;
                 const filePath = path.join(sandboxDir, fileName);
-                await fs.writeFile(filePath, generatedCode, "utf-8");
+                const cleanedCode = sanitizeSandboxCode(generatedCode);
+                await fs.writeFile(filePath, cleanedCode, "utf-8");
                 sandboxNotice = `\nSaved to Sandbox: \`src/sandbox/${fileName}\``;
             } catch (sErr: any) {
                 // Ignore sandbox write error

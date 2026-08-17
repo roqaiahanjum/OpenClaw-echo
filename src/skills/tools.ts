@@ -13,6 +13,42 @@ import { Diplomat } from "../core/diplomat";
 const execAsync = promisify(exec);
 
 /**
+ * Sanitizes generated LLM output before writing to src/sandbox/ directory.
+ * Removes markdown code fences, language identifiers, headers, and conversational prose.
+ */
+export function sanitizeSandboxCode(content: string): string {
+    if (!content || typeof content !== "string") return "";
+
+    let raw = content.trim();
+
+    // 1. If content contains markdown code fences, extract code inside the blocks
+    const codeBlockRegex = /```(?:[a-zA-Z0-9_+-]+)?\s*([\s\S]*?)```/g;
+    const matches = [...raw.matchAll(codeBlockRegex)];
+
+    if (matches.length > 0) {
+        const extractedCodes = matches
+            .map(m => m[1].trim())
+            .filter(code => code.length > 0);
+
+        if (extractedCodes.length > 0) {
+            return extractedCodes.join("\n\n");
+        }
+    }
+
+    // 2. If no valid code fences, strip out markdown headers, stray backticks, and conversational text
+    let cleaned = raw
+        // Remove markdown headers: e.g. ### Python Code, # Header
+        .replace(/^#+\s+.*$/gm, "")
+        // Remove stray code fence markers
+        .replace(/```[a-zA-Z0-9_+-]*/g, "")
+        // Remove leading/trailing backticks
+        .replace(/^`+|`+$/g, "")
+        .trim();
+
+    return cleaned;
+}
+
+/**
  * Web Search Tool (The Oracle)
  * Powered by Tavily Search API.
  */
@@ -176,9 +212,11 @@ export const writeSandboxFileTool = tool(
                 return "Safety Violation: Cannot write files outside the src/sandbox directory.";
             }
 
-            await fs.writeFile(targetPath, content, "utf-8");
+            const cleanedContent = sanitizeSandboxCode(content);
+
+            await fs.writeFile(targetPath, cleanedContent, "utf-8");
             console.log(`[Skill] Successfully wrote file to sandbox: ${fileName}`);
-            return `Successfully created file 'src/sandbox/${fileName}' (${content.length} bytes).`;
+            return `Successfully created file 'src/sandbox/${fileName}' (${cleanedContent.length} bytes).`;
         } catch (error: any) {
             return `Write error: ${error.message}`;
         }
@@ -286,9 +324,11 @@ export const runSandboxCodeTool = tool(
 export const synthesizeSkillTool = tool(
     async ({ name, description, code, schemaJSON }: { name: string, description: string, code: string, schemaJSON: string }) => {
         try {
+            const cleanedCode = sanitizeSandboxCode(code);
+
             // 1. Local Syntax Validation Check before writing file
             try {
-                new Function("input", code);
+                new Function("input", cleanedCode);
             } catch (syntaxErr: any) {
                 console.error(`[Synthesis] Syntax validation failed for skill '${name}':`, syntaxErr.message);
                 return `Skill synthesis rejected: JavaScript syntax error in code block: ${syntaxErr.message}`;
@@ -306,7 +346,7 @@ const { z } = require("zod");
 
 exports.tool = tool(
     async (input) => {
-        ${code}
+        ${cleanedCode}
     },
     {
         name: "${name}",

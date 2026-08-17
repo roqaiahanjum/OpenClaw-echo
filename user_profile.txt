@@ -11,3 +11,5 @@ Name: test_key
 Preferences: test_value_openclaw
 Name: test_key
 Preferences: test_value_openclaw
+Name: test_key
+Preferences: test_value_openclaw
