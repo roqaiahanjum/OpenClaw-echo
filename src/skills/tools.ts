@@ -524,15 +524,162 @@ export const searchMemoryTool = tool(
 
 export const generateDataChartTool = tool(
     async ({ title, type, dataJSON }: { title: string, type: string, dataJSON: string }) => {
-        return `Chart generated: ${title} (${type}) with data: ${dataJSON}`;
+        try {
+            const sandboxDir = path.resolve("src/sandbox");
+            await fs.mkdir(sandboxDir, { recursive: true });
+
+            const timestamp = Date.now();
+            const fileName = `chart_${timestamp}.html`;
+            const filePath = path.resolve(sandboxDir, fileName);
+
+            let parsedData: any = [];
+            try {
+                parsedData = typeof dataJSON === "string" ? JSON.parse(dataJSON) : dataJSON;
+            } catch (e) {
+                parsedData = [];
+            }
+
+            let labels: string[] = [];
+            let values: number[] = [];
+
+            if (Array.isArray(parsedData)) {
+                if (parsedData.length > 0 && typeof parsedData[0] === "object" && parsedData[0] !== null) {
+                    labels = parsedData.map((item: any, idx: number) =>
+                        item.label || item.category || item.name || item.x || `Item ${idx + 1}`
+                    );
+                    values = parsedData.map((item: any) => {
+                        const val = item.value ?? item.count ?? item.y ?? Object.values(item)[1] ?? Object.values(item)[0];
+                        return typeof val === "number" ? val : Number(val) || 0;
+                    });
+                } else {
+                    labels = parsedData.map((_, idx) => `Item ${idx + 1}`);
+                    values = parsedData.map(val => Number(val) || 0);
+                }
+            } else if (parsedData && typeof parsedData === "object") {
+                if (Array.isArray(parsedData.labels) && (Array.isArray(parsedData.data) || Array.isArray(parsedData.datasets))) {
+                    labels = parsedData.labels;
+                    values = Array.isArray(parsedData.data) ? parsedData.data : (parsedData.datasets?.[0]?.data || []);
+                } else {
+                    labels = Object.keys(parsedData);
+                    values = Object.values(parsedData).map(v => Number(v) || 0);
+                }
+            }
+
+            const chartType = (type || "bar").toLowerCase();
+            const validTypes = ["bar", "line", "pie", "doughnut", "radar", "polararea"];
+            const normalizedType = validTypes.includes(chartType) ? chartType : "bar";
+
+            const escapedTitle = title.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+            const htmlContent = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${escapedTitle}</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        .chart-container {
+            background-color: #1e293b;
+            border-radius: 16px;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+            padding: 30px;
+            width: 100%;
+            max-width: 800px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        h1 {
+            margin-top: 0;
+            margin-bottom: 20px;
+            font-size: 24px;
+            text-align: center;
+            color: #38bdf8;
+        }
+    </style>
+</head>
+<body>
+    <div class="chart-container">
+        <h1>${escapedTitle}</h1>
+        <canvas id="myChart"></canvas>
+    </div>
+    <script>
+        const ctx = document.getElementById('myChart').getContext('2d');
+        new Chart(ctx, {
+            type: '${normalizedType}',
+            data: {
+                labels: ${JSON.stringify(labels)},
+                datasets: [{
+                    label: ${JSON.stringify(escapedTitle)},
+                    data: ${JSON.stringify(values)},
+                    backgroundColor: [
+                        'rgba(56, 189, 248, 0.7)',
+                        'rgba(129, 140, 248, 0.7)',
+                        'rgba(244, 63, 94, 0.7)',
+                        'rgba(251, 146, 60, 0.7)',
+                        'rgba(74, 222, 128, 0.7)',
+                        'rgba(192, 132, 252, 0.7)',
+                        'rgba(250, 204, 21, 0.7)'
+                    ],
+                    borderColor: [
+                        '#38bdf8',
+                        '#818cf8',
+                        '#f43f5e',
+                        '#fb923c',
+                        '#4ade80',
+                        '#c084fc',
+                        '#facc15'
+                    ],
+                    borderWidth: 2
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: {
+                        labels: {
+                            color: '#94a3b8'
+                        }
+                    }
+                },
+                scales: ${['pie', 'doughnut', 'polararea'].includes(normalizedType) ? '{}' : `{
+                    x: { ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                    y: { ticks: { color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.05)' } }
+                }`}
+            }
+        });
+    </script>
+</body>
+</html>`;
+
+            await fs.writeFile(filePath, htmlContent, "utf-8");
+            console.log(`[Skill] Generated data chart saved to: ${filePath}`);
+
+            return `Chart generated successfully! Saved standalone HTML chart to file: ${filePath} (relative: src/sandbox/${fileName}). Title: "${title}" (${normalizedType} chart).`;
+        } catch (error: any) {
+            console.error("[Skill] generate_data_chart failed:", error);
+            return `Failed to generate data chart: ${error.message}`;
+        }
     },
     {
         name: "generate_data_chart",
-        description: "Generates HTML/CSS data charts in sandbox.",
+        description: "Generates a visual data chart as a standalone HTML file inside src/sandbox/ directory.",
         schema: z.object({
-            title: z.string(),
-            type: z.string(),
-            dataJSON: z.string()
+            title: z.string().describe("Title of the data chart"),
+            type: z.string().describe("Type of chart (e.g., 'bar', 'line', 'pie', 'doughnut')"),
+            dataJSON: z.string().describe("JSON string representing data points e.g. '[{\"label\": \"Jan\", \"value\": 10}]'")
         })
     }
 );
