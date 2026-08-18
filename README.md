@@ -1,8 +1,8 @@
 <div align="center">
-  
+
 # 🤖 OpenClaw Echo
 
-**A resilient, local-first autonomous AI agent framework with Hybrid Memory, Sub-Agent Swarms, and Network Self-Healing.**
+**A Resilient, Local-First Autonomous AI Agent Framework with Multi-Provider Router, 4-Layer Hybrid Memory, GraphRAG, and Self-Healing Recovery.**
 
 ![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white)
 ![Node.js](https://img.shields.io/badge/Node.js-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)
@@ -10,67 +10,92 @@
 ![Groq](https://img.shields.io/badge/Groq-F55036?style=for-the-badge&logo=groq&logoColor=white)
 ![Telegram](https://img.shields.io/badge/Telegram-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white)
 ![SQLite](https://img.shields.io/badge/SQLite-07405E?style=for-the-badge&logo=sqlite&logoColor=white)
+![React](https://img.shields.io/badge/React_19-61DAFB?style=for-the-badge&logo=react&logoColor=black)
 
 </div>
 
 ---
 
-## 📖 What is OpenClaw Echo?
+## 📖 Overview
 
-**OpenClaw Echo** is a production-ready AI agent framework built in TypeScript, accessible natively through a Telegram Bot interface. It is designed to handle multi-step reasoning tasks by distributing workloads across specialized sub-agents, while maintaining deep context through a multi-layered hybrid memory system.
+**OpenClaw Echo** is a production-ready autonomous AI agent framework built in TypeScript. Designed for high availability, multi-step task execution, and deep context retention, OpenClaw Echo operates seamlessly through a **Telegram Bot** and a real-time **Web Telemetry Dashboard**.
 
-### The Problem it Solves
-Traditional LLM wrappers suffer from isolated conversations, context window exhaustion, and sudden crashes when API quotas are hit. OpenClaw Echo solves this by introducing **semantic memory retention** and a **Waterfall Failover Router**. If your primary AI provider (Google Gemini) times out or hits a rate limit, the system instantly and silently routes the request to a fallback provider (Groq) without dropping the user's conversation.
+For a complete 31-section academic audit report suitable for final-year engineering project submissions, see [`TECHNICAL_AUDIT_REPORT.md`](./TECHNICAL_AUDIT_REPORT.md).
 
 ---
 
-## ✨ Key Implemented Capabilities
+## 🔑 Key Features
 
-- **Sub-Agent Framework:** Parallel task execution through specialized workers. The `SubAgentManager` delegates tasks to dedicated `Research Agent`, `Coding Agent`, and `Browser Agent` workers.
-- **Multi-Layer Hybrid Memory:** Deep context retention using a multi-tiered architecture:
-  - **SQLite Relational Facts:** Extracts and deduplicates user profile data, project info, and preferences into `openclaw.db`.
-  - **Conversation & Summaries:** Tracks recent interactions and periodically summarizes them to save tokens.
-  - **Vector Semantic Search:** Uses LangChain's MemoryVectorStore and Google Embeddings to map and retrieve knowledge from a persistent JSON-backed semantic core.
-- **Waterfall Failover Router:** A highly resilient circuit-breaker model. Queries attempt `Gemini 2.5 Flash` first. If it fails (timeout, 429 quota), it gracefully degrades to `Groq Llama 3.1 8B` or `Mixtral`, ensuring 100% uptime.
-- **Fast-Path Execution:** An intent classifier detects simple queries (e.g., greetings) or direct search requests (e.g., "latest news"), bypassing the heavy planning layer and saving processing time.
-- **Telegram Native UI:** Complete integration with Telegraf for a smooth, conversational user interface.
-- **Pre-Flight Shield:** Verifies critical environment variables and connections on boot.
+- **Multi-Provider Waterfall Router:** Failover engine that routes requests through **Groq (Llama 3 8B)** for ultra-fast latency and automatically cascades to **Google Gemini 2.5 Flash** if rate limits (`HTTP 429`), timeouts, or 404 errors occur. Features 5-minute circuit breaker cooldowns.
+- **4-Layer Persistent Memory + GraphRAG:**
+  1. *Layer 1 (Short-Term History):* SQLite table storing recent message turns per chat ID.
+  2. *Layer 2 (Vector Semantic Core):* In-memory vector store backed by Google `text-embedding-004` (768 dimensions), persisted to `semantic_core.json`.
+  3. *Layer 3 (Knowledge Facts):* Deduplicated key-value facts (user profile, project details) stored in SQLite.
+  4. *Layer 4 (Summaries):* Periodically synthesizes conversation summaries every 50 turns.
+  5. *Knowledge Graph (GraphRAG):* Dual regex & LLM triple extraction storing nodes and edges in SQLite for relational sub-graph traversals.
+- **Hybrid Verification Engine:** Blends zero-latency deterministic local verifiers (`localVerifier.ts`) with Gemini LLM verifiers (`verifier.ts`) to validate tool execution outputs.
+- **Self-Healing Recovery Engine:** Evaluates tool execution failures and autonomously selects recovery strategies (`modify_args`, `alternative_tool`, `retry_same`, `replan`, `abort`).
+- **Sub-Agent ACP Delegation:** Decomposes complex multi-step prompts into structured tasks executed in parallel by specialized worker sub-agents (`ResearchSubAgent`, `CodingSubAgent`, `BrowserSubAgent`).
+- **23 Registered Functional Tools:** Includes sandbox JavaScript code execution, HTML Chart.js data visualization, Tavily web search, Nodemailer SMTP email reporting, Git operations, and memory search tools.
+- **Real-Time Telemetry Dashboard:** React 19 + Vite SPA and lightweight SSE HTML page broadcasting live agent status, memory stats, and execution logs.
+- **24/7 Production Deployment:** PM2 process manager configuration (`ecosystem.config.js`) and multi-stage Docker build support.
 
 ---
 
 ## 🏗️ System Architecture
 
-Requests flow through the Telegram Polling Interface, hit the Intent Classifier, and either take a Fast Path or get routed to the Sub-Agent Manager for complex planning. Memory is dynamically pulled and stored at every step.
-
-```mermaid
-graph TD
-    User((User)) -->|Telegram Message| TP[Telegram Polling Interface]
-    TP --> Classifier{Intent Classifier}
-    
-    Classifier -->|Simple Chat / Search| FastPath[Fast-Path Engine]
-    Classifier -->|Complex Task| SAM[Sub-Agent Manager]
-    
-    subgraph Parallel Execution Layer
-        SAM -->|Delegates| RA[Research Agent]
-        SAM -->|Delegates| CA[Coding Agent]
-        SAM -->|Delegates| BA[Browser Agent]
-    end
-    
-    subgraph Hybrid Memory Core
-        RA -.->|Fact Extraction / Retrieval| DB[(SQLite Relational DB)]
-        CA -.->|Semantic Search| VS[(Vector Embeddings)]
-        FastPath -.-> DB
-    end
-    
-    subgraph Waterfall Failover Router
-        RA --> MR[Model Router]
-        CA --> MR
-        FastPath --> MR
-        MR -->|Primary Route| API1[Google Gemini API]
-        MR -->|Fallback Route| API2[Groq Llama 3 / Mixtral]
-    end
-    
-    MR -->|Synthesized Output| TP
+```
+   [User Request] (Telegram / Web Dashboard)
+          │
+          ▼
+   [telegram.ts Handler]
+          │
+          ├──────────► Fast-Path Checks (Greetings / Direct Search) ──► [Fast Reply]
+          │
+          ▼
+   [MemoryManager.getContext()]
+   ├── Layer 1: SQLite Short-Term History (Last 20 messages)
+   ├── Layer 2: Vector RAG Core (semantic_core.json / text-embedding-004)
+   ├── Layer 3: SQLite Knowledge Facts (user_profile, project)
+   ├── Layer 4: SQLite Summaries
+   └── Layer 5: Knowledge Graph Sub-Graph Traversal (GraphRAG)
+          │
+          ▼
+   [Planner Guard (planner.ts)]
+   ├── Simple Query? ──► Deterministic Local Plan
+   └── Complex Task? ──► LLM Execution Plan Generation
+          │
+          ▼
+   [ACP Multi-Agent Delegation Check]
+   ├── Multi-Step Task? ──► Dispatch via SubAgentManager & Worker Agents
+   └── Standard Task ────► Autonomous Tool Execution Loop (Max 15 iterations)
+          │
+          ▼
+   [ModelRouter (router.ts)]
+   ├── Check Model Cooldown & Circuit Breakers
+   ├── Try Primary: Groq (Llama 3 8B)
+   └── If Quota/Timeout/429 ──► Fallover to Secondary: Gemini 2.5 Flash
+          │
+          ▼
+   [Tool Execution (src/sandbox/)]
+          │
+          ▼
+   [Verification Layer]
+   ├── Step 1: Local Deterministic Verifier (localVerifier.ts)
+   └── Step 2: Gemini LLM Verifier (verifier.ts)
+          │
+          ▼
+   [Recovery Engine (recovery.ts)] (If Verification Fails)
+   ├── Strategy: modify_args | alternative_tool | retry_same | replan | abort
+          │
+          ▼
+   [Memory Persistence & Telemetry Broadcast]
+   ├── Persist User & Agent turn to SQLite `interactions`
+   ├── Extract Facts & Triples (Background thread)
+   └── Broadcast SSE Telemetry to Web Dashboard
+          │
+          ▼
+   [Final Response Delivered]
 ```
 
 ---
@@ -79,119 +104,114 @@ graph TD
 
 | Category | Technologies Used |
 | :--- | :--- |
-| **Language & Runtime** | Node.js (v20+), TypeScript |
-| **Orchestration** | LangChain Core & Community |
-| **AI Providers** | Google Generative AI (`gemini-2.5-flash`), Groq SDK (`llama-3.1-8b`) |
-| **Database & Memory** | SQLite3 (`openclaw.db`), LangChain VectorStore |
-| **User Interface** | Telegram Bot API (`telegraf`), Express.js |
+| **Language & Runtime** | Node.js (v20+), TypeScript (v5.6) |
+| **Server & Integration** | Express.js, Telegraf (Telegram Bot API) |
+| **AI Models & Providers** | Groq SDK (`llama3-8b-8192`), Google GenAI (`gemini-2.5-flash`), Google Embeddings (`text-embedding-004`) |
+| **Database & Vectors** | SQLite3 (`openclaw.db`), LangChain `MemoryVectorStore` (`semantic_core.json`) |
+| **Web Dashboard** | React 19, Vite, TailwindCSS, Server-Sent Events (SSE) |
+| **Deployment** | PM2 Process Manager (`ecosystem.config.js`), Docker, Streamlit (`admin_panel.py`) |
 
 ---
 
-## 📂 Project Structure
+## 📂 Directory Structure
 
 ```text
-open-claw-echo/
-├── src/
-│   ├── agents/          # Specialized sub-agents (Coding, Research, Browser)
-│   ├── core/            # Core routing, planners, intent classifiers, and failover
-│   ├── integrations/    # Telegram bot and Express webhooks
-│   ├── memory/          # Hybrid SQLite + Vector memory managers
-│   └── skills/          # Custom tool registries (Web search, execution, etc.)
-├── dashboard/           # Front-end administration (Build artifacts)
-├── openclaw.db          # Local SQLite relational memory
-├── semantic_core.json   # Local serialized vector embeddings
-└── package.json
+OpenClaw Echo
+├── TECHNICAL_AUDIT_REPORT.md # 31-Section Comprehensive Technical Audit Report
+├── .env / .env.example       # Environment variables & API keys
+├── Dockerfile                # Multi-stage container build
+├── docker-compose.yml        # Service orchestration (Ollama + OpenClaw)
+├── ecosystem.config.js       # PM2 daemon configuration
+├── openclaw.db               # SQLite database
+├── admin_panel.py            # Streamlit database administration panel
+├── public/dashboard.html     # Lightweight SSE dashboard page
+├── dashboard/                # React 19 + Vite dashboard SPA
+│   ├── src/App.tsx
+│   └── vite.config.ts
+├── scripts/                  # Utility scripts (kill-port, documentation generator)
+└── src/
+    ├── index.ts              # Server bootstrap entry point
+    ├── agents/               # Sub-agent ACP orchestrator and workers
+    ├── core/                 # Router, planner, verifiers, recovery, telemetry
+    ├── integrations/         # Telegram bot and Express web application
+    ├── memory/               # 4-Layer memory manager and GraphRAG extractor
+    ├── sandbox/              # Safe file & execution directory
+    └── skills/               # Tool registry (registry.ts) and 23 tool implementations (tools.ts)
 ```
 
 ---
 
-## 🚀 Installation & Setup
+## 🚀 Quick Start
 
 ### 1. Prerequisites
 - [Node.js](https://nodejs.org/) (v20 or higher)
-- Telegram Bot Token (from [@BotFather](https://t.me/botfather) on Telegram)
-- [Google AI Studio API Key](https://aistudio.google.com/) (Required)
-- [Groq API Key](https://console.groq.com/) (Optional, highly recommended for failover)
+- Telegram Bot Token (from [@BotFather](https://t.me/botfather))
+- [Google AI Studio API Key](https://aistudio.google.com/)
+- [Groq API Key](https://console.groq.com/)
 
-### 2. Clone and Install
+### 2. Installation
 ```bash
 git clone https://github.com/roqaiahanjum/OpenClaw-echo.git
 cd OpenClaw-echo
 npm install
 ```
 
-### 3. Environment Configuration
-Create a `.env` file in the root directory based on the provided `.env.example`:
+### 3. Environment Setup
+Create a `.env` file in the root directory:
 
 ```env
-# Critical (Required)
 TELEGRAM_TOKEN=your_telegram_bot_token_here
 GOOGLE_API_KEY=your_gemini_api_key_here
-
-# Fallback / Features (Optional but Recommended)
 GROQ_API_KEY=your_groq_api_key_here
+TAVILY_API_KEY=your_tavily_search_api_key_here
 PORT=3005
 ```
 
-### 4. Boot the Agent
-Run the development environment. The **Pre-Flight Shield** will verify your keys before engaging the Telegram polling engine.
-
+### 4. Run Development Server
 ```bash
 npm run dev
 ```
 
-*(To run the production-optimized build, use `npm run start`)*
+### 5. Production Deployment (PM2)
+```bash
+npm run build
+pm2 start ecosystem.config.js
+```
 
 ---
 
-## 🧪 Testing the Agent
+## 🧪 Testing & Benchmarks
 
-Open your Telegram bot and try these prompts to test the specific subsystems:
+Run the complete automated test suite:
 
-1. **Test Hybrid Memory:**
-   - `"My name is Alice and I am a 4th year CSE student."`
-   - *(Wait for response)*
-   - `"What year of college am I in?"` *(The agent will pull this from SQLite)*
-2. **Test Fast-Path / Direct Search:**
-   - `"Look up the latest news on AI."` *(Bypasses the planner for instant results)*
-3. **Test Waterfall Failover (Chaos Test):**
-   - Temporarily change your `.env` `GOOGLE_API_KEY` to an invalid string.
-   - Restart the server and ask a question.
-   - *Result: The circuit breaker trips and seamlessly routes your request to Groq without crashing.*
+```bash
+# Execute end-to-end multi-provider fallback test
+npx ts-node run_final_e2e_test.ts
 
----
+# Execute circuit breaker rate limit test
+npx ts-node run_circuit_breaker_refactor_test.ts
 
-## 📊 System Evaluation & Performance Benchmarks
+# Execute full 23-tool regression test
+npm run test:tools
 
-| Evaluation Metric | Benchmark / Target | Measured Value | Testing Methodology |
-| :--- | :--- | :--- | :--- |
-| **Intent Classification Accuracy** | > 90% | **96.2%** | Tested across 150 prompt samples (Simple Fast-Path vs Complex Swarm). |
-| **Retrieval Precision@5** | > 85% | **91.4%** | Relevance ratio of top-5 retrieved chunks from SQLite + Vector store. |
-| **Retrieval Recall@5** | > 80% | **88.7%** | Ratio of relevant historical facts pulled into prompt context budget. |
-| **Failover Success Rate** | 100% | **99.8%** | Groq Llama 3 fallback completion rate on simulated 30s Gemini timeouts. |
-| **Fast-Path Latency** | < 2.0s | **0.85s** | End-to-end response time for direct conversational queries. |
-| **Swarm Task Latency** | < 15.0s | **8.4s** | Parallel execution time across Research, Coding, and Browser sub-agents. |
+# Execute evaluation benchmarks
+npm run eval
+```
 
-### 🔬 Evaluation Methodology
-- **Memory Precision & Recall:** Evaluated by querying historical user facts stored in `openclaw.db` across 50 multi-turn test conversations and measuring cosine similarity relevance against ground truth facts.
-- **Failover Verification:** Validated via automated chaos testing by simulating Gemini API rate-limits (`HTTP 429`) and hard network timeouts (`> 30s`), confirming instant auto-routing to Groq SDK without dropping user sessions.
+### Performance Benchmarks Measured
+- **Intent Classification Accuracy:** 96.2%
+- **Retrieval Precision@5:** 91.4%
+- **Failover Success Rate:** 99.8% (Groq fallback on simulated Gemini failure)
+- **Fast-Path Simple Latency:** 0.85s avg
 
 ---
 
-## 🚧 Current Limitations & Future Roadmap
+## 📄 Documentation
 
-**Currently Implemented:**
-- ✅ Sub-agent delegation for multi-step prompts.
-- ✅ Hybrid Memory deduplication and persistence.
-- ✅ Automatic AI provider failover.
-- ✅ Telegram-native integration.
-
-**Future Roadmap (Not Yet Implemented):**
-- ⏳ **Local-Only LLM Mode:** Full integration with Ollama to run models completely offline without cloud APIs.
-- ⏳ **Advanced GraphRAG:** While foundational graph structures exist, full multi-hop traversal is planned for the next release.
-- ⏳ **Continuous Autonomous Mode:** Allowing the agent to run background cron jobs or continuous research loops without user prompting.
+For full architecture details, tool definitions, verification rules, database schemas, bug history, and building guidelines, refer to [`TECHNICAL_AUDIT_REPORT.md`](./TECHNICAL_AUDIT_REPORT.md).
 
 ---
+
 <div align="center">
   <i>Built with precision. Engineered for resilience.</i>
 </div>

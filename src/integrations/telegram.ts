@@ -74,7 +74,7 @@ async function safeSend(ctx: any, text: string, options: any = {}) {
 
 const invokeWithTimeout = async (messages: any[], mode?: string, options?: any) => {
     const controller = new AbortController();
-    const timeoutMs = 55000;
+    const timeoutMs = 120000;
     let timer: NodeJS.Timeout;
     const timeoutPromise = new Promise((_, reject) => {
         timer = setTimeout(() => {
