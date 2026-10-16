@@ -41,16 +41,19 @@ export class SubAgentManager {
             };
         }
 
+        console.log(`[StructuredLog] [TaskId:${task.taskId}] [Agent:${task.targetAgent}] [Event:TaskStart]`);
         DashboardLogger.log(`[ACP Protocol] Dispatching task ${task.taskId} -> Worker: ${task.targetAgent}`);
         const tStart = Date.now();
 
         try {
             const result = await worker.execute(task);
             const duration = Date.now() - tStart;
+            console.log(`[StructuredLog] [TaskId:${task.taskId}] [Selected agent:${task.targetAgent}] [Status:${result.status}] [Duration:${duration}ms] [Final result:${result.status === 'SUCCESS' ? 'Task completed successfully' : (result.error || 'Task failed')}]`);
             DashboardLogger.log(`[ACP Protocol] Task ${task.taskId} completed by ${task.targetAgent} in ${duration}ms (Status: ${result.status})`);
             return result;
         } catch (err: any) {
             const duration = Date.now() - tStart;
+            console.warn(`[StructuredLog] [TaskId:${task.taskId}] [Selected agent:${task.targetAgent}] [Status:FAILED] [Duration:${duration}ms] [Final result:Failed - ${err.message}]`);
             DashboardLogger.log(`[ACP Protocol] Task ${task.taskId} failed: ${err.message}`);
             return {
                 taskId: task.taskId,
@@ -68,6 +71,53 @@ export class SubAgentManager {
         DashboardLogger.log(`[SubAgentManager] Executing ${tasks.length} sub-agent tasks in parallel via Promise.all()...`);
         const results = await Promise.all(tasks.map(t => this.delegateTask(t)));
         return results;
+    }
+
+    public async delegateTasksWithDependencies(tasks: ACPTask[]): Promise<ACPResult[]> {
+        if (!tasks || tasks.length === 0) return [];
+
+        const completedResults: Map<string, ACPResult> = new Map();
+        const pendingTasks = [...tasks];
+        const allResults: ACPResult[] = [];
+
+        while (pendingTasks.length > 0) {
+            // Find tasks whose dependencies are satisfied
+            const readyTasks = pendingTasks.filter(t =>
+                !t.dependsOn || t.dependsOn.length === 0 || t.dependsOn.every(depId => completedResults.has(depId))
+            );
+
+            if (readyTasks.length === 0) {
+                console.warn("[SubAgentManager] Dependency cycle or unresolvable dependencies detected. Running remaining tasks.");
+                readyTasks.push(...pendingTasks);
+            }
+
+            // Remove readyTasks from pendingTasks
+            for (const ready of readyTasks) {
+                const idx = pendingTasks.indexOf(ready);
+                if (idx !== -1) pendingTasks.splice(idx, 1);
+
+                // Inject prerequisite findings into contextPayload
+                if (ready.dependsOn && ready.dependsOn.length > 0) {
+                    ready.contextPayload = ready.contextPayload || {};
+                    const prerequisiteFindings = ready.dependsOn.map(depId => {
+                        const depResult = completedResults.get(depId);
+                        return depResult ? depResult.resultData : "";
+                    }).filter(Boolean).join("\n\n---\n\n");
+                    ready.contextPayload.prerequisiteFindings = prerequisiteFindings;
+                }
+            }
+
+            // Execute this wave concurrently using delegateTasksParallel()
+            DashboardLogger.log(`[SubAgentManager] Executing wave of ${readyTasks.length} task(s) concurrently via delegateTasksParallel()...`);
+            const waveResults = await this.delegateTasksParallel(readyTasks);
+
+            for (const res of waveResults) {
+                completedResults.set(res.taskId, res);
+                allResults.push(res);
+            }
+        }
+
+        return allResults;
     }
 }
 

@@ -14,14 +14,31 @@ export class ResearchSubAgent implements WorkerAgent {
 
         try {
             let webResults = "";
+            let toolSuccess = false;
+            const toolStart = Date.now();
+
+            let searchQuery = task.taskDescription;
+            const qMatch = task.taskDescription.match(/research\s+(?:the\s+)?([^,.;]+)/i);
+            if (qMatch && qMatch[1]) {
+                searchQuery = qMatch[1].trim();
+            }
+
             const webSearchTool = SkillRegistry.getToolByName("web_search");
             if (webSearchTool) {
                 try {
-                    webResults = await webSearchTool.invoke({ query: task.taskDescription });
+                    webResults = String(await webSearchTool.invoke({ query: searchQuery }));
+                    toolSuccess = !webResults.toLowerCase().includes("fatal") && webResults.length > 30;
                 } catch (e: any) {
-                    webResults = `Web search offline: ${e.message}`;
+                    webResults = `Web search error: ${e.message}`;
+                    toolSuccess = false;
                 }
+            } else {
+                webResults = "web_search tool is not registered in registry.";
+                toolSuccess = false;
             }
+
+            const toolDuration = Date.now() - toolStart;
+            console.log(`[StructuredLog] [TaskId:${task.taskId}] [Agent:ResearchSubAgent] [Tool:web_search] [Status:${toolSuccess ? 'SUCCESS' : 'FAILED'}] [DurationMs:${toolDuration}] [Result:Extracted ${webResults.length} chars]`);
 
             let graphResults = "";
             try {
@@ -40,19 +57,19 @@ export class ResearchSubAgent implements WorkerAgent {
 
             let synthesis = "";
             const router = ModelRouter.getInstance();
-            if (!router.isInFallbackMode()) {
+            if (!router.isInFallbackMode() && toolSuccess) {
                 try {
-                    const prompt = `You are ResearchSubAgent. Synthesize the findings for the user query: "${task.taskDescription}".
+                    const prompt = `You are ResearchSubAgent. Synthesize the findings for the research query: "${searchQuery}".
 Web Search Results:
 ${webResults}
 
 Knowledge Graph Context:
 ${graphResults}
 
-Provide a clear, structured research summary in 3-4 bullet points.`;
+Provide a clear, structured research summary in 3-4 concise bullet points with cited sources.`;
 
                     const timeoutPromise = new Promise((_, reject) =>
-                        setTimeout(() => reject(new Error('RESEARCH_TIMEOUT')), 30000)
+                        setTimeout(() => reject(new Error('RESEARCH_TIMEOUT')), 25000)
                     );
 
                     const response: any = await Promise.race([
@@ -64,18 +81,19 @@ Provide a clear, structured research summary in 3-4 bullet points.`;
                     ]);
                     synthesis = (response.content as string) || webResults;
                 } catch (e: any) {
-                    synthesis = webResults || "Research completed with basic search results.";
+                    synthesis = webResults;
                 }
             } else {
-                synthesis = webResults || "Research completed with offline knowledge.";
+                synthesis = webResults || "Research completed with basic search results.";
             }
 
             const executionTimeMs = Date.now() - startTime;
             return {
                 taskId: task.taskId,
                 targetAgent: this.agentType,
-                status: "SUCCESS",
-                resultData: `### Research Synthesis\n\n${synthesis.trim()}`,
+                status: toolSuccess ? "SUCCESS" : "FAILED",
+                resultData: toolSuccess ? `### Research Synthesis\n\n${synthesis.trim()}` : `⚠️ [ResearchSubAgent Partial]: ${webResults}`,
+                error: toolSuccess ? undefined : webResults,
                 executionTimeMs
             };
         } catch (err: any) {

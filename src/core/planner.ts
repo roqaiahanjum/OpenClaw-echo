@@ -83,7 +83,7 @@ export function evaluatePlanComplexity(input: string, availableTools: string[]):
  * Planner Engine
  * Decomposes incoming user requests into a structured execution plan before tool execution.
  */
-export async function generatePlan(input: string, availableTools: string[]): Promise<ExecutionPlan | null> {
+export async function generatePlan(input: string, availableTools: string[], parentSignal?: AbortSignal): Promise<ExecutionPlan | null> {
     try {
         const router = ModelRouter.getInstance();
         if (router.isInFallbackMode()) {
@@ -108,9 +108,26 @@ Return ONLY valid JSON matching this schema, without any markdown formatting or 
             new HumanMessage(input)
         ];
 
-        const response = await router.invoke(messages, "planner");
+        const controller = new AbortController();
+        const timeoutMs = 7000; // 7s strict timeout to prevent orchestrator stalls
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+        if (parentSignal) {
+            if (parentSignal.aborted) {
+                clearTimeout(timer);
+                return null;
+            }
+            parentSignal.addEventListener('abort', () => controller.abort(), { once: true });
+        }
+
+        let response: any;
+        try {
+            response = await router.invoke(messages, "planner", { signal: controller.signal });
+        } finally {
+            clearTimeout(timer);
+        }
+
         let rawContent = response.content as string;
-        
         rawContent = rawContent.replace(/```json/g, "").replace(/```/g, "").trim();
         
         const parsed = JSON.parse(rawContent);
@@ -123,7 +140,7 @@ Return ONLY valid JSON matching this schema, without any markdown formatting or 
         }
         return null;
     } catch (error: any) {
-        console.warn("[Planner] Plan generation skipped:", error.message);
+        console.warn("[Planner] Plan generation skipped or timed out:", error.message);
         return null;
     }
 }
@@ -132,21 +149,43 @@ Return ONLY valid JSON matching this schema, without any markdown formatting or 
  * Smart Planner Wrapper (Phase 4B)
  * Uses evaluatePlanComplexity to bypass LLM planning on simple prompts or fallback mode.
  */
-export async function generateSmartPlan(input: string, availableTools: string[]): Promise<ExecutionPlan | null> {
+export async function generateSmartPlan(input: string, availableTools: string[], parentSignal?: AbortSignal): Promise<ExecutionPlan | null> {
+    if (parentSignal?.aborted) {
+        return null;
+    }
+    const check = evaluatePlanComplexity(input, availableTools);
     const router = ModelRouter.getInstance();
     if (router.isInFallbackMode()) {
         console.log(`[PlannerGuard] BYPASSED LLM — Router in Fallback Mode (Saved 1 Gemini API Call)`);
-        const check = evaluatePlanComplexity(input, availableTools);
         return check.localPlan || { goal: input, steps: [{ stepNumber: 1, description: "Direct execution", suggestedTool: undefined }] };
     }
 
-    const check = evaluatePlanComplexity(input, availableTools);
     if (!check.isComplex && check.localPlan) {
         console.log(`[PlannerGuard] BYPASSED LLM — ${check.reason} (Saved 1 Gemini API Call)`);
         return check.localPlan;
     }
-    console.log(`[PlannerGuard] COMPLEX — ${check.reason}. Invoking Gemini LLM planner...`);
-    return await generatePlan(input, availableTools);
+
+    console.log(`[PlannerGuard] COMPLEX — ${check.reason}. Invoking LLM planner with 7s budget...`);
+    const plan = await generatePlan(input, availableTools, parentSignal);
+    if (parentSignal?.aborted) {
+        return null;
+    }
+    if (!plan) {
+        if (check.localPlan) {
+            console.log(`[PlannerGuard] Planner timed out or failed — Falling back to deterministic local plan.`);
+            return check.localPlan;
+        }
+        console.log(`[PlannerGuard] Planner timed out or failed on complex prompt — Falling back to structured multi-step plan.`);
+        return {
+            goal: input,
+            steps: [
+                { stepNumber: 1, description: "Gather context and relevant information", suggestedTool: undefined },
+                { stepNumber: 2, description: "Execute tools to fulfill requested actions", suggestedTool: undefined },
+                { stepNumber: 3, description: "Validate result and synthesize comprehensive output", suggestedTool: undefined }
+            ]
+        };
+    }
+    return plan;
 }
 
 export function formatPlanForPrompt(plan: ExecutionPlan): string {
@@ -172,40 +211,80 @@ export function decomposeIntoACPTasks(userPrompt: string, parentId?: string): AC
     const tasks: ACPTask[] = [];
     const rootId = parentId || `acp_root_${Date.now()}`;
 
-    const needsResearch = lower.includes("research") || lower.includes("find") || lower.includes("search") || lower.includes("history") || lower.includes("turing");
-    const needsCoding = lower.includes("code") || lower.includes("script") || lower.includes("write a") || lower.includes("function") || lower.includes("typescript") || lower.includes("javascript");
-    const needsBrowser = lower.includes("url") || lower.includes("http") || lower.includes("web page") || lower.includes("fetch page") || lower.includes("browse");
+    const codingKeywords = [
+        "code", "script", "write a", "function", "typescript", "javascript", "python",
+        "create file", "create a file", "write file", "save file", "make file", "generate file",
+        "file in sandbox", ".ts", ".js", ".py", ".json", "sandbox file", "generate a"
+    ];
+    const isFileCreation = (
+        (lower.includes("create") || lower.includes("write") || lower.includes("generate") || lower.includes("make") || lower.includes("save")) &&
+        (lower.includes("file") || lower.includes(".ts") || lower.includes(".js") || lower.includes("script") || lower.includes("sandbox") || lower.includes("example"))
+    );
+    const needsCoding = isFileCreation || codingKeywords.some(kw => lower.includes(kw));
+
+    const needsResearch = (lower.includes("research") || lower.includes("benefits of") || lower.includes("history of") || lower.includes("turing")) &&
+        !(isFileCreation && !lower.includes("research") && !lower.includes("benefits"));
+
+    const needsBrowser = (lower.includes("url") || lower.includes("http://") || lower.includes("https://") || lower.includes("web page") || lower.includes("scrape") || lower.includes("fetch page") || lower.includes("browse") || (lower.includes("documentation") && (lower.includes("browse") || lower.includes("official") || lower.includes("online")))) &&
+        !(isFileCreation && !lower.includes("browse") && !lower.includes("http") && !lower.includes("scrape"));
+
+    const infoGatheringTaskIds: string[] = [];
+    const resTaskId = `task_res_${Date.now()}_1`;
+    const browTaskId = `task_brow_${Date.now()}_2`;
+    const codeTaskId = `task_code_${Date.now()}_3`;
 
     if (needsResearch) {
+        infoGatheringTaskIds.push(resTaskId);
         tasks.push({
-            taskId: `task_res_${Date.now()}_1`,
+            taskId: resTaskId,
             parentId: rootId,
             targetAgent: 'research',
             taskDescription: userPrompt,
             contextPayload: { originalPrompt: userPrompt },
-            maxDepth: 2
-        });
-    }
-
-    if (needsCoding) {
-        tasks.push({
-            taskId: `task_code_${Date.now()}_2`,
-            parentId: rootId,
-            targetAgent: 'coding',
-            taskDescription: userPrompt,
-            contextPayload: { originalPrompt: userPrompt },
-            maxDepth: 2
+            maxDepth: 2,
+            dependsOn: []
         });
     }
 
     if (needsBrowser) {
+        infoGatheringTaskIds.push(browTaskId);
+        let browserUrl: string | undefined = undefined;
+        const urlMatch = userPrompt.match(/https?:\/\/[^\s]+/i);
+        if (urlMatch) {
+            browserUrl = urlMatch[0];
+        } else if (lower.includes("typescript")) {
+            browserUrl = "https://www.typescriptlang.org/docs/";
+        }
+
         tasks.push({
-            taskId: `task_brow_${Date.now()}_3`,
+            taskId: browTaskId,
             parentId: rootId,
             targetAgent: 'browser',
             taskDescription: userPrompt,
-            contextPayload: { originalPrompt: userPrompt },
-            maxDepth: 2
+            contextPayload: { originalPrompt: userPrompt, url: browserUrl },
+            maxDepth: 2,
+            dependsOn: []
+        });
+    }
+
+    if (needsCoding) {
+        let fileName: string | undefined = undefined;
+        const fileMatch = userPrompt.match(/(?:named|called|file|into|save|create)\s+([a-zA-Z0-9_\-]+\.(?:ts|js|json|txt|py))/i) ||
+                          userPrompt.match(/([a-zA-Z0-9_\-]+\.(?:ts|js|json|txt|py))/i);
+        if (fileMatch) {
+            fileName = fileMatch[1];
+        } else if (lower.includes("typescript") && (lower.includes("example") || lower.includes("agent"))) {
+            fileName = "typescript_ai_agent_example.ts";
+        }
+
+        tasks.push({
+            taskId: codeTaskId,
+            parentId: rootId,
+            targetAgent: 'coding',
+            taskDescription: userPrompt,
+            contextPayload: { originalPrompt: userPrompt, fileName },
+            maxDepth: 2,
+            dependsOn: infoGatheringTaskIds.length > 0 ? infoGatheringTaskIds : []
         });
     }
 
@@ -218,7 +297,8 @@ export function decomposeIntoACPTasks(userPrompt: string, parentId?: string): AC
                 targetAgent: 'research',
                 taskDescription: `Research key details for: ${userPrompt}`,
                 contextPayload: { originalPrompt: userPrompt },
-                maxDepth: 2
+                maxDepth: 2,
+                dependsOn: []
             },
             {
                 taskId: `task_code_${Date.now()}_2`,
@@ -226,7 +306,8 @@ export function decomposeIntoACPTasks(userPrompt: string, parentId?: string): AC
                 targetAgent: 'coding',
                 taskDescription: `Implement code or structured solution for: ${userPrompt}`,
                 contextPayload: { originalPrompt: userPrompt },
-                maxDepth: 2
+                maxDepth: 2,
+                dependsOn: [`task_res_${Date.now()}_1`]
             }
         );
     }

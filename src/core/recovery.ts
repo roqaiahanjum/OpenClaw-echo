@@ -33,6 +33,13 @@ export async function determineRecoveryStrategy(input: RecoveryInput): Promise<R
     }
 
     try {
+        const router = ModelRouter.getInstance();
+        if (router.isInFallbackMode()) {
+            return {
+                strategy: "abort",
+                reason: "Recovery skipped (Router in fallback mode)."
+            };
+        }
         const { SkillRegistry } = await import("../skills/registry");
         const availableToolDetails = input.availableTools.map(tName => {
             const tool = SkillRegistry.getToolByName(tName);
@@ -43,7 +50,6 @@ export async function determineRecoveryStrategy(input: RecoveryInput): Promise<R
             return `- ${tName}`;
         }).join("\n");
 
-        const router = ModelRouter.getInstance();
         const recoveryPrompt = `You are the OpenClaw Self-Healing Recovery Engine.
 A tool execution failed verification. Analyze the failure and recommend a recovery strategy.
 

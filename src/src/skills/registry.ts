@@ -62,7 +62,7 @@ export class SkillRegistry {
      */
     static getTools() {
         if (!this.cachedTools) {
-            this.cachedTools = [...this.tools];
+            this.cachedTools = this.tools.filter(Boolean);
         }
         return this.cachedTools;
     }
@@ -97,6 +97,9 @@ export class SkillRegistry {
      */
     static getToolByName(name: string) {
         const tools = this.getTools();
+        if (name === "send_email") {
+            return tools.find(tool => tool.name === "send_email_report" || tool.name === "send_email");
+        }
         return tools.find(tool => tool.name === name);
     }
 }
