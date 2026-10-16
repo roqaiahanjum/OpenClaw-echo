@@ -1,0 +1,151 @@
+id,is_held_out,prompt,expected_path,predicted_path,path_correct,expected_category,predicted_category,category_correct,tool_count
+1,0,"hi",fast,fast,1,fast_path,fast_path,1,0
+2,0,"hello",fast,fast,1,fast_path,fast_path,1,0
+3,0,"hey",fast,fast,1,fast_path,fast_path,1,0
+4,0,"Hello there!",fast,fast,1,fast_path,fast_path,1,0
+5,0,"Good morning",fast,fast,1,fast_path,fast_path,1,0
+6,0,"Good evening",fast,fast,1,fast_path,fast_path,1,0
+7,0,"How are you doing today?",fast,tool,0,fast_path,core_default,0,5
+8,0,"Who are you?",fast,fast,1,fast_path,fast_path,1,0
+9,0,"What is your name?",fast,fast,1,fast_path,fast_path,1,0
+10,0,"Tell me a joke",fast,fast,1,fast_path,fast_path,1,0
+11,0,"Are you an AI assistant?",fast,tool,0,fast_path,core_default,0,5
+12,0,"Thank you so much",fast,tool,0,fast_path,core_default,0,5
+13,0,"Thanks a lot",fast,fast,1,fast_path,fast_path,1,0
+14,0,"Goodbye",fast,fast,1,fast_path,fast_path,1,0
+15,0,"See you later",fast,fast,1,fast_path,fast_path,1,0
+16,0,"What can you do?",fast,fast,1,fast_path,fast_path,1,0
+17,0,"Nice to meet you",fast,tool,0,fast_path,core_default,0,5
+18,0,"Tell me something interesting",fast,tool,0,fast_path,core_default,0,5
+19,0,"2+2",fast,fast,1,calculation,fast_path,0,1
+20,0,"what is 15 * 4?",fast,fast,1,calculation,fast_path,0,0
+21,0,"calculate 100 / 5",fast,fast,1,calculation,fast_path,0,1
+22,0,"50 - 25",fast,fast,1,calculation,fast_path,0,0
+23,0,"12 * 12",fast,fast,1,calculation,fast_path,0,0
+24,0,"what is 99 + 1?",fast,fast,1,calculation,fast_path,0,0
+25,0,"calculate 300 / 3",fast,fast,1,calculation,fast_path,0,1
+26,0,"sqrt(144)",fast,tool,0,calculation,calculation,1,1
+27,0,"25 + 75",fast,fast,1,calculation,fast_path,0,0
+28,0,"10 * 10",fast,fast,1,calculation,fast_path,0,0
+29,0,"this is awesome",fast,tool,0,fast_path,core_default,0,5
+30,0,"I think you are helpful",fast,tool,0,fast_path,core_default,0,5
+31,0,"what is the history of chess?",fast,tool,0,fast_path,core_default,0,5
+32,0,"this computer is fast",fast,tool,0,fast_path,core_default,0,5
+33,0,"I like this idea",fast,tool,0,fast_path,core_default,0,5
+34,0,"Run this JavaScript: console.log(2+2)",tool,tool,1,code_execution,code_execution+calculation,1,2
+35,0,"Execute script math.js in sandbox",tool,tool,1,code_execution,code_execution+calculation+file_system,1,3
+36,0,"run the code inside run.js",tool,tool,1,code_execution,code_execution,1,2
+37,0,"run_sandbox_code on test.js",tool,tool,1,code_execution,code_execution,1,2
+38,0,"execute javascript to compute prime numbers",tool,tool,1,code_execution,code_execution+calculation,1,2
+39,0,"evaluate this code: console.log('hello')",tool,tool,1,code_execution,code_execution,1,2
+40,0,"Run this python script",tool,tool,1,code_execution,code_execution,1,2
+41,0,"write_sandbox_file and run_sandbox_code",tool,tool,1,code_execution,core_default,0,5
+42,0,"synthesize_skill to add two matrices",tool,tool,1,delegation,core_default,0,5
+43,0,"synthesize a new tool named word_counter",tool,tool,1,delegation,core_default,0,5
+44,0,"Add a goal: finish testing",tool,tool,1,goals,goals,1,1
+45,0,"What are my goals?",tool,tool,1,goals,goals,1,1
+46,0,"My goals",tool,tool,1,goals,goals,1,1
+47,0,"List all project goals",tool,tool,1,goals,goals,1,1
+48,0,"Add a milestone: deploy to production",tool,tool,1,goals,goals+delegation,1,3
+49,0,"What are the project objectives?",tool,tool,1,goals,goals,1,1
+50,0,"Show my goals list",tool,tool,1,goals,goals,1,1
+51,0,"manage_project_goals list",tool,tool,1,goals,core_default,0,5
+52,0,"Remove goal finish testing",tool,tool,1,goals,goals,1,1
+53,0,"Update goal status to completed",tool,tool,1,goals,goals,1,1
+54,0,"Remember that my favorite color is teal",tool,tool,1,memory,memory,1,5
+55,0,"What is my favorite color?",tool,tool,1,memory,core_default,0,5
+56,0,"Recall my saved facts",tool,tool,1,memory,memory,1,5
+57,0,"search_memory for architecture notes",tool,tool,1,memory,system_audit,0,4
+58,0,"Store fact user_profile timezone is UTC+5",tool,tool,1,memory,calculation+memory,1,6
+59,0,"What do you know about my profile?",tool,tool,1,memory,memory,1,5
+60,0,"get_all_knowledge from memory",tool,tool,1,memory,memory,1,5
+61,0,"search memory for recent discussions",tool,tool,1,memory,web_research+memory,1,7
+62,0,"check saved facts in memory store",tool,tool,1,memory,memory,1,5
+63,0,"Create a file named notes.txt",tool,tool,1,file_system,file_system,1,2
+64,0,"Write file summary.md containing analysis",tool,tool,1,file_system,file_system,1,2
+65,0,"Read file notes.txt in sandbox",tool,tool,1,file_system,code_execution+file_system,1,3
+66,0,"Delete file temp.txt",tool,tool,1,file_system,file_system,1,2
+67,0,"List files in the sandbox directory",tool,tool,1,file_system,code_execution+file_system,1,3
+68,0,"Check sandbox folder contents",tool,tool,1,file_system,code_execution+file_system,1,3
+69,0,"Save data to data.json",tool,tool,1,file_system,core_default,0,5
+70,0,"Send email to team@example.com",tool,tool,1,email,email,1,1
+71,0,"Send email report with subject Status Update",tool,tool,1,email,email,1,1
+72,0,"Dispatch an smtp alert to the manager",tool,tool,1,email,email,1,1
+73,0,"Email the daily synopsis to owner",tool,tool,1,email,email,1,1
+74,0,"Send mail regarding release v2",tool,tool,1,email,email,1,1
+75,0,"Check git status",tool,tool,1,git,git,1,1
+76,0,"Show git log for the last 5 commits",tool,tool,1,git,git,1,1
+77,0,"What git branch am I currently on?",tool,tool,1,git,git,1,1
+78,0,"Inspect git repo differences",tool,tool,1,git,file_system+git,1,3
+79,0,"Show git commit history",tool,tool,1,git,git,1,1
+80,0,"Schedule a task to run daily at 9am",tool,tool,1,schedule,code_execution+clockwork,0,3
+81,0,"List all scheduled tasks",tool,tool,1,schedule,clockwork,0,1
+82,0,"Set a reminder timer for 15 minutes",tool,tool,1,schedule,clockwork,0,1
+83,0,"Create a recurring cron schedule",tool,tool,1,schedule,clockwork,0,1
+84,0,"Cancel scheduled task task_123",tool,tool,1,schedule,clockwork,0,1
+85,0,"Search web for recent AI research papers",tool,tool,1,search_web,web_research,0,2
+86,0,"Google the release date of TypeScript 5.8",tool,tool,1,search_web,code_execution+web_research,0,4
+87,0,"Scrape content from https://example.com",tool,tool,1,search_web,web_research,0,2
+88,0,"Browse the web for latest tech news",tool,tool,1,search_web,web_research,0,2
+89,0,"Fetch URL https://news.ycombinator.com",tool,tool,1,search_web,web_research,0,2
+90,0,"visualize architecture of the system",tool,tool,1,system_meta,system_audit,0,4
+91,0,"generate project manual",tool,tool,1,system_meta,system_audit,0,4
+92,0,"run system audit on current codebase",tool,tool,1,system_meta,code_execution+system_audit,0,6
+93,0,"generate data chart for monthly revenue",tool,tool,1,system_meta,system_audit,0,4
+94,0,"delegate task to research agent",tool,tool,1,delegation,delegation,1,3
+95,0,"get memory statistics",tool,tool,1,memory,memory,1,5
+96,0,"What is this?",fast,tool,0,fast_path,core_default,0,5
+97,0,"Can you review this explanation?",fast,tool,0,fast_path,core_default,0,5
+98,0,"Is this assumption accurate?",fast,tool,0,fast_path,core_default,0,5
+99,0,"What are my current objectives?",tool,tool,1,goals,goals,1,1
+100,0,"List my quarterly objectives and aims",tool,tool,1,goals,goals,1,1
+101,1,"Hey buddy how's your day going?",fast,tool,0,fast_path,core_default,0,5
+102,1,"Can you tell me a good bedtime story?",fast,tool,0,fast_path,core_default,0,5
+103,1,"Who invented the telephone?",fast,tool,0,fast_path,core_default,0,5
+104,1,"What is the capital of Australia?",fast,tool,0,fast_path,core_default,0,5
+105,1,"I appreciate your assistance",fast,tool,0,fast_path,core_default,0,5
+106,1,"See ya later alligator",fast,tool,0,fast_path,core_default,0,5
+107,1,"Hi there, hope you are having fun",fast,tool,0,fast_path,core_default,0,5
+108,1,"Can you explain what quantum computing is?",fast,tool,0,fast_path,core_default,0,5
+109,1,"Why is the sky blue?",fast,tool,0,fast_path,core_default,0,5
+110,1,"You are doing great",fast,tool,0,fast_path,core_default,0,5
+111,1,"what is 200 * 4",fast,fast,1,calculation,fast_path,0,0
+112,1,"calculate 144 / 12",fast,fast,1,calculation,fast_path,0,1
+113,1,"33 + 67",fast,fast,1,calculation,fast_path,0,0
+114,1,"what is 500 - 150?",fast,fast,1,calculation,fast_path,0,0
+115,1,"calculate 8 * 9",fast,fast,1,calculation,fast_path,0,1
+116,1,"Please run this JS code: console.log('testing')",tool,tool,1,code_execution,code_execution,1,2
+117,1,"Can you execute this script to compute primes?",tool,tool,1,code_execution,code_execution+calculation,1,2
+118,1,"Run JavaScript code to format the JSON string",tool,tool,1,code_execution,code_execution,1,2
+119,1,"Execute the file script.js in our sandbox",tool,tool,1,code_execution,code_execution+file_system,1,3
+120,1,"Evaluate the javascript expression 2 ** 10",tool,tool,1,code_execution,code_execution,1,2
+121,1,"Add new goal: prepare slides for Thursday",tool,tool,1,goals,goals,1,1
+122,1,"What project goals have I defined so far?",tool,tool,1,goals,goals,1,1
+123,1,"List my active milestones please",tool,tool,1,goals,goals,1,1
+124,1,"Do I have any goals set for this week?",tool,tool,1,goals,goals,1,1
+125,1,"Add milestone: ship beta release to users",tool,tool,1,goals,goals+delegation,1,3
+126,1,"Please remember that I am an engineer from Cairo",tool,tool,1,memory,memory,1,5
+127,1,"What city did I tell you I was from?",tool,tool,1,memory,core_default,0,5
+128,1,"Recall the project notes from our previous meeting",tool,tool,1,memory,memory,1,5
+129,1,"Search memory for database credentials discussion",tool,tool,1,memory,web_research+memory,1,7
+130,1,"Save fact preference editor VSCode",tool,tool,1,memory,memory,1,5
+131,1,"Create a new file named audit_summary.txt",tool,tool,1,file_system,file_system,1,2
+132,1,"Read the file configuration.json from the sandbox",tool,tool,1,file_system,code_execution+file_system,1,3
+133,1,"Write file checklist.txt with items 1 2 3",tool,tool,1,file_system,file_system,1,2
+134,1,"List files inside the sandbox folder",tool,tool,1,file_system,code_execution+file_system,1,3
+135,1,"Remove old file test_run.log",tool,tool,1,file_system,file_system,1,2
+136,1,"Send an email update to roqaiah@example.com",tool,tool,1,email,email,1,1
+137,1,"Please email the quarterly findings to the lead",tool,tool,1,email,email,1,1
+138,1,"Dispatch an urgent mail regarding system downtime",tool,tool,1,email,email,1,1
+139,1,"Show git status of the project",tool,tool,1,git,git,1,1
+140,1,"Check recent commits on the current branch in git",tool,tool,1,git,git,1,1
+141,1,"Can you run git diff to see recent changes?",tool,tool,1,git,code_execution+git,1,3
+142,1,"Schedule a reminder to stretch every 2 hours",tool,tool,1,schedule,clockwork,0,1
+143,1,"What tasks are currently scheduled on cron?",tool,tool,1,schedule,clockwork,0,1
+144,1,"Set a timer for 30 minutes to review code",tool,tool,1,schedule,code_execution+clockwork,0,3
+145,1,"Search web for LangChain LangGraph comparison",tool,tool,1,search_web,web_research,0,2
+146,1,"Scrape the webpage https://docs.github.com",tool,tool,1,search_web,web_research,0,2
+147,1,"Google the weather forecast in Tokyo",tool,tool,1,search_web,web_research,0,2
+148,1,"Visualize architecture of our agent pipeline",tool,tool,1,system_meta,system_audit,0,4
+149,1,"Generate project manual documentation",tool,tool,1,system_meta,system_audit,0,4
+150,1,"Delegate task to coding agent to write a parser",tool,tool,1,delegation,delegation,1,3

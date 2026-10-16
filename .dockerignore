@@ -2,13 +2,30 @@ node_modules
 npm-debug.log
 .git
 *.md
+.env*
+*.env
+*.env.*
+
+# Persistent storage & databases
+*.db
+*.sqlite
+*.sqlite-journal
+openclaw.db
+
+# Memory & vector caches
+src/memory/semantic_core*.json
+src/src/memory/semantic_core*.json
+scratch/embedding_cache.json
 
 # Sandbox data (persisted via volumes, not baked into image)
 src/sandbox/*
+src/src/sandbox/*
 src/skills/dynamic/*
-openclaw.db
-src/memory/semantic_core.json
 
-# Dashboard node_modules (rebuilt in Stage 1)
+# Dashboard build artifacts
 dashboard/node_modules
-c
+dist
+build
+.tsbuildinfo
+logs
+*.log

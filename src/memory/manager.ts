@@ -9,6 +9,8 @@ import { ModelRouter } from "../core/router";
 import { SystemMessage, HumanMessage } from "@langchain/core/messages";
 import { KnowledgeGraphManager } from "./KnowledgeGraphManager";
 import { extractAndStoreTriples } from "./graphExtractor";
+import { DashboardLogger } from "../core/logger";
+import { SQLITE_DB_PATH, SEMANTIC_CORE_PATH, ensureStorageDirectories } from "../core/storage";
 
 // Load .env with absolute path — works from any working directory
 dotenv.config({ 
@@ -43,16 +45,16 @@ export class MemoryManager {
     private db: sqlite3.Database;
     private vectorStore: MemoryVectorStore | null = null;
     private embeddings: GoogleGenerativeAIEmbeddings;
-    private storagePath: string = path.join(__dirname, "semantic_core.json");
+    private storagePath: string = SEMANTIC_CORE_PATH;
     private isInitialized: boolean = false;
     private embeddingCache = new Map<string, number[]>();
 
     private constructor() {
-        this.db = new sqlite3.Database("./openclaw.db", (err) => {
+        this.db = new sqlite3.Database(SQLITE_DB_PATH, (err) => {
             if (err) {
                 console.error("[Memory] SQLite Connection Error:", err.message);
             } else {
-                console.log("[Memory] SQLite Connected.");
+                console.log(`[Memory] SQLite Connected (${SQLITE_DB_PATH}).`);
             }
         });
 
@@ -63,7 +65,7 @@ export class MemoryManager {
 
         this.embeddings = new GoogleGenerativeAIEmbeddings({
             apiKey: apiKey!,
-            model: 'text-embedding-004',
+            model: 'gemini-embedding-001',
         });
     }
 
@@ -139,7 +141,16 @@ export class MemoryManager {
                         pageContent: item.content,
                         metadata: item.metadata
                     }));
-                    await this.vectorStore.addDocuments(docs);
+                    const validItems = serialized.filter(item => Array.isArray(item.embedding) && item.embedding.length === 3072);
+                    if (validItems.length > 0) {
+                        const vectors = validItems.map(item => item.embedding);
+                        const docs = validItems.map(item => ({
+                            pageContent: item.content,
+                            metadata: item.metadata
+                        }));
+                        await this.vectorStore.addVectors(vectors, docs);
+                        console.log(`[Memory] Loaded ${validItems.length} verified 3072-dim vectors into memory.`);
+                    }
                 }
             } catch (e) {
                 console.log("[Memory] No existing semantic core found. Starting fresh.");
@@ -162,13 +173,15 @@ export class MemoryManager {
             this.db.get<KnowledgeFact>(`SELECT * FROM knowledge WHERE key = ?`, [key], (err, row) => resolve(row || null));
         });
 
+        const nowIso = new Date().toISOString();
+
         if (existing) {
             if (existing.value.trim().toLowerCase() === value.trim().toLowerCase()) {
                 console.log(`[Memory] Fact deduplicated (identical value exists). Updating timestamp: [${category}] ${key}`);
                 return new Promise((resolve) => {
                     this.db.run(
-                        `UPDATE knowledge SET timestamp = CURRENT_TIMESTAMP WHERE key = ?`,
-                        [key],
+                        `UPDATE knowledge SET timestamp = ? WHERE key = ?`,
+                        [nowIso, key],
                         (err) => resolve(!err)
                     );
                 });
@@ -176,8 +189,8 @@ export class MemoryManager {
             console.log(`[Memory] Fact updated (conflict resolved): [${category}] ${key}: "${existing.value}" -> "${value}"`);
             return new Promise((resolve) => {
                 this.db.run(
-                    `UPDATE knowledge SET value = ?, confidence = ?, timestamp = CURRENT_TIMESTAMP WHERE key = ?`,
-                    [value, confidence, key],
+                    `UPDATE knowledge SET value = ?, confidence = ?, timestamp = ? WHERE key = ?`,
+                    [value, confidence, nowIso, key],
                     (err) => resolve(!err)
                 );
             });
@@ -185,8 +198,8 @@ export class MemoryManager {
 
         return new Promise((resolve) => {
             this.db.run(
-                `INSERT INTO knowledge (id, category, key, value, confidence, timestamp) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
-                [id, category, key, value, confidence],
+                `INSERT INTO knowledge (id, category, key, value, confidence, timestamp) VALUES (?, ?, ?, ?, ?, ?)`,
+                [id, category, key, value, confidence, nowIso],
                 (err) => {
                     if (err) {
                         console.error("[Memory] Save Fact Error:", err.message);
@@ -203,7 +216,7 @@ export class MemoryManager {
     public async getAllFacts(): Promise<KnowledgeFact[]> {
         await this.initialize().catch(() => {});
         return new Promise((resolve) => {
-            this.db.all<KnowledgeFact>(`SELECT * FROM knowledge ORDER BY category, confidence DESC`, [], (err, rows) => {
+            this.db.all<KnowledgeFact>(`SELECT * FROM knowledge ORDER BY timestamp DESC, confidence DESC`, [], (err, rows) => {
                 if (err || !rows) {
                     resolve([]);
                 } else {
@@ -301,7 +314,15 @@ export class MemoryManager {
 
         if (this.vectorStore) {
             try {
-                const vecDocs = await this.vectorStore.similaritySearch(query, 5);
+                let timer: NodeJS.Timeout;
+                const timeoutPromise = new Promise<any[]>((_, reject) => {
+                    timer = setTimeout(() => reject(new Error("VECTOR_SEARCH_TIMEOUT")), 5000);
+                });
+                const vecDocs = await Promise.race([
+                    this.vectorStore.similaritySearch(query, 5),
+                    timeoutPromise
+                ]).finally(() => clearTimeout(timer!));
+
                 if (vecDocs && vecDocs.length > 0) {
                     results.push(`[SEMANTIC_MEMORY MATCHES]\n` + vecDocs.map(d => docToText(d)).join("\n---\n"));
                 }
@@ -381,7 +402,7 @@ export class MemoryManager {
         });
     }
 
-    public async getSemanticContext(userInput: string): Promise<string> {
+    public async getSemanticContext(userInput: string, chatId?: string): Promise<string> {
         if (!this.vectorStore || !userInput) return "";
         try {
             const cacheKey = userInput.substring(0, 100);
@@ -410,7 +431,7 @@ export class MemoryManager {
 
     public async addInteraction(arg1: string, arg2: string, arg3: string = "default"): Promise<void> {
         await this.initialize().catch(() => { });
-        const id = `msg_${Date.now()}`;
+        const id = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
         let userInput = arg1;
         let agentResponse = arg2;
@@ -472,11 +493,52 @@ export class MemoryManager {
         });
     }
 
+    // --- TIMEOUT ISOLATION HELPER FOR 4-TIER MEMORY LAYERS ---
+    private async executeLayerWithTimeout<T>(
+        layerName: string,
+        fetcher: (signal: AbortSignal) => Promise<T>,
+        fallback: T,
+        timeoutMs: number = 6000
+    ): Promise<{ data: T; durationMs: number; timedOut: boolean }> {
+        const controller = new AbortController();
+        const t0 = Date.now();
+        let timer: NodeJS.Timeout;
+
+        const timeoutPromise = new Promise<{ data: T; durationMs: number; timedOut: boolean }>((resolve) => {
+            timer = setTimeout(() => {
+                controller.abort();
+                const duration = Date.now() - t0;
+                console.warn(`[Memory] ${layerName} timed out after ${timeoutMs}ms — skipping`);
+                resolve({ data: fallback, durationMs: duration, timedOut: true });
+            }, timeoutMs);
+        });
+
+        try {
+            const result = await Promise.race([
+                fetcher(controller.signal).then(d => {
+                    clearTimeout(timer);
+                    return { data: d, durationMs: Date.now() - t0, timedOut: false };
+                }),
+                timeoutPromise
+            ]);
+            return result;
+        } catch (err: any) {
+            clearTimeout(timer!);
+            const duration = Date.now() - t0;
+            console.warn(`[Memory] ${layerName} Error: ${err.message}`);
+            return { data: fallback, durationMs: duration, timedOut: false };
+        }
+    }
+
     // --- FAILURE ISOLATED CONTEXT ASSEMBLY ---
 
-    public async getContext(arg1: string, arg2: string = "default"): Promise<string> {
+    public async getContext(arg1: string, arg2: string = "default", parentSignal?: AbortSignal): Promise<string> {
         try {
             await this.initialize().catch(() => { });
+
+            if (parentSignal?.aborted) {
+                return "No previous context available (Flow Aborted).";
+            }
 
             let userInput = arg1;
             let chatId = arg2;
@@ -496,13 +558,24 @@ export class MemoryManager {
 
             const kg = KnowledgeGraphManager.getInstance();
 
-            const [facts, recentRows, summaryRows, semanticText, graphData] = await Promise.all([
-                this.getAllFacts().catch(e => { console.warn("[Memory] Layer 3 Knowledge Fact Fetch Error:", e.message); return []; }),
-                this.getRecentHistory(chatId).catch(e => { console.warn("[Memory] Layer 1 Recent History Fetch Error:", e.message); return []; }),
-                this.getRelevantSummaries().catch(e => { console.warn("[Memory] Layer 4 Summary Fetch Error:", e.message); return []; }),
-                this.getSemanticContext(userInput).catch(e => { console.warn("[Memory] Layer 2 Vector Search Fetch Error:", e.message); return ""; }),
-                kg.traverseSubGraph(seedKeywords, 2).catch(e => { console.warn("[Memory] GraphRAG Fetch Error:", e.message); return { seedEntities: [], visitedEntities: [], triples: [] }; })
+            // Execute EACH of the 4 memory layers in its own 6-second timeout with AbortController
+            const [l1, l2, l3, l4, lKg] = await Promise.all([
+                this.executeLayerWithTimeout("Layer 1 (Recent History)", () => this.getRecentHistory(chatId), []),
+                this.executeLayerWithTimeout("Layer 2 (Vector Search)", () => this.getSemanticContext(userInput), ""),
+                this.executeLayerWithTimeout("Layer 3 (Knowledge Facts)", () => this.getAllFacts(), []),
+                this.executeLayerWithTimeout("Layer 4 (Summaries)", () => this.getRelevantSummaries(), []),
+                this.executeLayerWithTimeout("GraphRAG", () => kg.traverseSubGraph(seedKeywords, 2), { seedEntities: [], visitedEntities: [], triples: [] })
             ]);
+
+            const perLayerLog = `Layer 1 (Recent History): ${l1.durationMs}ms | Layer 2 (Vector Search): ${l2.durationMs}ms | Layer 3 (Knowledge Facts): ${l3.durationMs}ms | Layer 4 (Summaries): ${l4.durationMs}ms | GraphRAG: ${lKg.durationMs}ms`;
+            console.log(`[Memory] Retrieval Breakdown: ${perLayerLog}`);
+            DashboardLogger.log(`[Memory] Retrieval Breakdown: ${perLayerLog}`);
+
+            const recentRows = l1.data;
+            const semanticText = l2.data;
+            const facts = l3.data;
+            const summaryRows = l4.data;
+            const graphData = lKg.data;
 
             let knowledgeText = "";
             if (facts.length > 0) {

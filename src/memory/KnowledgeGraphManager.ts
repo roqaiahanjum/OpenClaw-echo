@@ -1,6 +1,7 @@
 // @ts-nocheck
 import sqlite3 from "sqlite3";
 import * as dotenv from "dotenv";
+import { SQLITE_DB_PATH } from "../core/storage";
 
 dotenv.config();
 
@@ -35,11 +36,11 @@ export class KnowledgeGraphManager {
     private isInitialized: boolean = false;
 
     private constructor() {
-        this.db = new sqlite3.Database("./openclaw.db", (err) => {
+        this.db = new sqlite3.Database(SQLITE_DB_PATH, (err) => {
             if (err) {
                 console.error("[Graph] SQLite Connection Error:", err.message);
             } else {
-                console.log("[Graph] SQLite Connected to Graph Storage.");
+                console.log(`[Graph] SQLite Connected to Graph Storage (${SQLITE_DB_PATH}).`);
             }
         });
     }

@@ -1,0 +1,145 @@
+[
+  {
+    "id": "goal_1776531860565",
+    "title": "Become a professional Full Stack Developer",
+    "description": "Aspiring to become a professional Full Stack Developer.",
+    "status": "active",
+    "progress": 0,
+    "subtasks": [],
+    "createdAt": "2026-04-18T17:04:20.565Z",
+    "updatedAt": "2026-04-18T17:04:20.565Z"
+  },
+  {
+    "id": "goal_1776531943706",
+    "title": "Become a professional Full Stack Developer",
+    "description": "Aspire to attain a professional level of expertise in Full Stack Development.",
+    "status": "active",
+    "progress": 0,
+    "subtasks": [],
+    "createdAt": "2026-04-18T17:05:43.706Z",
+    "updatedAt": "2026-04-18T17:05:43.706Z"
+  },
+  {
+    "id": "goal_1776532397624",
+    "title": "Become a professional Full Stack Developer",
+    "description": "Aspire to achieve proficiency in full-stack web development.",
+    "status": "active",
+    "progress": 0,
+    "subtasks": [],
+    "createdAt": "2026-04-18T17:13:17.624Z",
+    "updatedAt": "2026-04-18T17:13:17.624Z"
+  },
+  {
+    "id": "goal_1776533602844",
+    "title": "Become a professional Full Stack Developer",
+    "description": "Aspire to achieve proficiency in full-stack web development.",
+    "status": "active",
+    "progress": 0,
+    "subtasks": [
+      {
+        "id": "sub_0",
+        "title": "Learn HTML, CSS, and JavaScript",
+        "completed": false
+      },
+      {
+        "id": "sub_1",
+        "title": "Master a front-end framework (e.g., React, Angular, Vue)",
+        "completed": false
+      },
+      {
+        "id": "sub_2",
+        "title": "Learn a back-end language and framework (e.g., Node.js/Express, Python/Django/Flask, Ruby/Rails)",
+        "completed": false
+      },
+      {
+        "id": "sub_3",
+        "title": "Understand databases (SQL and NoSQL)",
+        "completed": false
+      },
+      {
+        "id": "sub_4",
+        "title": "Learn about APIs and RESTful services",
+        "completed": false
+      },
+      {
+        "id": "sub_5",
+        "title": "Explore version control with Git",
+        "completed": false
+      },
+      {
+        "id": "sub_6",
+        "title": "Understand deployment and hosting",
+        "completed": false
+      },
+      {
+        "id": "sub_7",
+        "title": "Build a portfolio of projects",
+        "completed": false
+      }
+    ],
+    "createdAt": "2026-04-18T17:33:22.844Z",
+    "updatedAt": "2026-04-18T17:33:22.845Z"
+  },
+  {
+    "id": "goal_1785940157498",
+    "title": "Prepare for seminar tomorrow",
+    "description": "Review materials and organize notes for the upcoming seminar.",
+    "status": "active",
+    "progress": 0,
+    "subtasks": [],
+    "createdAt": "2026-08-05T14:29:17.498Z",
+    "updatedAt": "2026-08-05T14:29:17.498Z"
+  },
+  {
+    "id": "goal_1786288147385",
+    "title": "OpenClaw Echo Agent Development",
+    "description": "Build and document OpenClaw Echo autonomous AI agent features including Telegram interface, web search, long-term memory, and self-healing.",
+    "status": "active",
+    "progress": 0,
+    "subtasks": [
+      {
+        "id": "sub_0",
+        "title": "Store context and architectural features in memory",
+        "completed": false
+      },
+      {
+        "id": "sub_1",
+        "title": "Generate architecture diagram",
+        "completed": false
+      },
+      {
+        "id": "sub_2",
+        "title": "Initialize project goals and documentation framework",
+        "completed": false
+      }
+    ],
+    "createdAt": "2026-08-09T15:09:07.385Z",
+    "updatedAt": "2026-08-09T15:09:07.385Z"
+  },
+  {
+    "id": "goal_1786288669795",
+    "title": "OpenClaw Echo Development",
+    "description": "Develop and maintain OpenClaw Echo, an autonomous AI agent with Telegram, web search, memory, and self-healing capabilities.",
+    "status": "active",
+    "progress": 0,
+    "subtasks": [
+      {
+        "id": "sub_0",
+        "title": "Telegram Integration",
+        "completed": false
+      },
+      {
+        "id": "sub_1",
+        "title": "Web Search & Memory Engine",
+        "completed": false
+      },
+      {
+        "id": "sub_2",
+        "title": "Self-Healing Capabilities",
+        "completed": false
+      }
+    ],
+    "createdAt": "2026-08-09T15:17:49.795Z",
+    "updatedAt": "2026-08-09T15:17:49.795Z"
+  }
+]

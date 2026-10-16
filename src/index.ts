@@ -48,6 +48,10 @@ async function bootstrap() {
 
     try {
         console.log("[System] Environment verified. Loading services...");
+        const { ensureStorageDirectories, SQLITE_DB_PATH, SANDBOX_DIR } = await import("./core/storage");
+        ensureStorageDirectories();
+        console.log(`[Storage] Storage directories verified (DB: ${SQLITE_DB_PATH}, Sandbox: ${SANDBOX_DIR})`);
+
         const { startServer, stopServer } = await import("./integrations/telegram");
         const server = await startServer();
         console.log("[System] System Online - Railway Deployment Ready");
@@ -58,7 +62,7 @@ async function bootstrap() {
             isShuttingDown = true;
             console.log(`\n[System] Signal ${signal} received. Stopping server and releasing ports...`);
             try {
-                await stopServer(server);
+                await stopServer(server, signal);
             } catch (e: any) {
                 console.error("[System] Error during server shutdown:", e.message);
             }
