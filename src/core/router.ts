@@ -549,11 +549,19 @@ export class ModelRouter {
 
                 const msg = String(error?.message || "");
                 const errCode = error?.code || error?.error?.code || "";
-                const isNotFound =
+                const isModelUnavailable =
                     error?.status === 404 ||
                     error?.statusCode === 404 ||
                     errCode === "model_not_found" ||
                     errCode === "model_decommissioned" ||
+                    // Specific HTTP 400 decommissioned or not-found model errors (do not catch generic invalid request 400)
+                    ((error?.status === 400 || error?.statusCode === 400) && (
+                        msg.includes("decommissioned") ||
+                        msg.includes("model_decommissioned") ||
+                        msg.includes("model_not_found") ||
+                        msg.includes("is not found") ||
+                        msg.includes("does not exist")
+                    )) ||
                     msg.includes("404") ||
                     msg.includes("model_not_found") ||
                     msg.includes("model_decommissioned") ||
@@ -568,7 +576,7 @@ export class ModelRouter {
                     msg.includes("ResourceExhausted") ||
                     msg.includes("Too Many Requests");
 
-                if (isNotFound) {
+                if (isModelUnavailable) {
                     console.warn(`[Router] ⚠️ Model [${candidate.modelName}] unavailable (not found/decommissioned). Cooling down model [${candidate.id}] and failing over.`);
                     this.tripCircuitBreakerForModel(candidate.id);
                 } else if (isQuotaOrExhausted) {

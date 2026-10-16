@@ -28,7 +28,6 @@ RUN npm install --legacy-peer-deps
 # Copy backend source
 COPY src/ ./src/
 COPY tsconfig.json ./
-COPY .env* ./
 
 # Copy compiled dashboard from Stage 1
 COPY --from=dashboard-builder /build/dist ./dashboard/dist

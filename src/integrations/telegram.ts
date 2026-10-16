@@ -15,16 +15,23 @@ import { ProjectAnalyzer } from "../core/analyzer";
 import { Clockwork } from "../core/clockwork";
 import { generateSmartPlan, formatPlanForPrompt, decomposeIntoACPTasks } from "../core/planner";
 import { SubAgentManager } from "../agents/SubAgentManager";
+import { ACPTask } from "../agents/types";
 import { verifyStepResult } from "../core/verifier";
 import { determineRecoveryStrategy } from "../core/recovery";
 import { localVerifyToolResult } from "../core/localVerifier";
 import { isSimpleConversation } from "../core/conversationGuard";
+import { ToolSelector } from "../core/toolSelector";
 
 import { telemetry } from "./telemetry";
 
 dotenv.config();
 
 const bot = new Telegraf(process.env.TELEGRAM_TOKEN || "");
+
+bot.catch((err: any, ctx: Context) => {
+    console.error(`[Telegram] Bot error caught by handler for update ${ctx?.update?.update_id}:`, err?.message || err);
+});
+
 const router = ModelRouter.getInstance();
 const memory = MemoryManager.getInstance();
 const app = express();
@@ -38,43 +45,106 @@ const PORT = parseInt(process.env.PORT || "3005");
 const WEBHOOK_PATH = "/api/webhook";
 
 let activePersonality: PersonalityMode = "standard";
+let isBotRunning = false;
+let isStopping = false;
 
-async function safeSend(ctx: any, text: string, options: any = {}) {
-    const MAX = 3800;
-    if (text.length <= MAX) {
-        try {
-            await ctx.reply(text, { parse_mode: 'Markdown', ...options });
-        } catch {
-            await ctx.reply(text, options); // fallback: no markdown
-        }
-        return;
+/**
+ * Splits text into chunks of at most `maxLen` characters (Telegram hard limit is 4096),
+ * preserving Markdown code fences (```lang ... ```) across split boundaries so each
+ * chunk remains valid syntax for Telegram's Markdown parser.
+ */
+export function splitTelegramMessage(text: string, maxLen: number = 3800): string[] {
+    if (!text || text.length <= maxLen) {
+        return [text || ""];
     }
-    // Split into chunks
-    const chunks = [];
-    let current = '';
-    for (const line of text.split('\n')) {
-        if ((current + '\n' + line).length > MAX) {
-            chunks.push(current);
-            current = line;
+
+    const lines = text.split('\n');
+    const chunks: string[] = [];
+    let currentChunk = '';
+    let inCodeBlock = false;
+    let codeBlockLang = '';
+
+    for (let i = 0; i < lines.length; i++) {
+        const rawLine = lines[i];
+
+        // Break up single lines that alone exceed maxLen
+        const subLines: string[] = [];
+        if (rawLine.length > maxLen) {
+            for (let offset = 0; offset < rawLine.length; offset += (maxLen - 100)) {
+                subLines.push(rawLine.slice(offset, offset + (maxLen - 100)));
+            }
         } else {
-            current += (current ? '\n' : '') + line;
+            subLines.push(rawLine);
+        }
+
+        for (const line of subLines) {
+            // Check if this line opens or closes a code fence
+            const fenceMatch = line.match(/^```(\w*)/);
+            const isFenceLine = fenceMatch !== null;
+
+            // Extra buffer needed if we have to close an open code block when splitting
+            const closeFenceBuffer = inCodeBlock ? 5 : 0; // "\n```"
+            const nextLen = currentChunk.length + (currentChunk ? 1 : 0) + line.length + closeFenceBuffer;
+
+            if (nextLen > maxLen && currentChunk.length > 0) {
+                if (inCodeBlock) {
+                    chunks.push(currentChunk + '\n```');
+                    currentChunk = '```' + codeBlockLang + '\n' + line;
+                } else {
+                    chunks.push(currentChunk);
+                    currentChunk = line;
+                }
+            } else {
+                currentChunk += (currentChunk ? '\n' : '') + line;
+            }
+
+            if (isFenceLine) {
+                if (!inCodeBlock) {
+                    inCodeBlock = true;
+                    codeBlockLang = fenceMatch[1] || '';
+                } else {
+                    inCodeBlock = false;
+                    codeBlockLang = '';
+                }
+            }
         }
     }
-    if (current) chunks.push(current);
-    
-    for (const chunk of chunks) {
+
+    if (currentChunk.trim().length > 0) {
+        if (inCodeBlock && !currentChunk.endsWith('```')) {
+            currentChunk += '\n```';
+        }
+        chunks.push(currentChunk);
+    }
+
+    return chunks;
+}
+
+export async function safeSend(ctx: any, text: string, options: any = {}) {
+    const chunks = splitTelegramMessage(text, 3800);
+
+    for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i];
         try {
             await ctx.reply(chunk, { parse_mode: 'Markdown', ...options });
-        } catch {
-            await ctx.reply(chunk, options);
+        } catch (err: any) {
+            console.warn(`[TelegramAPI] Markdown send failed for chunk ${i + 1}/${chunks.length}: ${err?.message}. Retrying plain text.`);
+            try {
+                await ctx.reply(chunk, options);
+            } catch (retryErr: any) {
+                console.error(`[TelegramAPI] Plain text send failed for chunk ${i + 1}/${chunks.length}: ${retryErr?.message}`);
+                throw retryErr;
+            }
         }
-        await new Promise(r => setTimeout(r, 300)); // small delay between chunks
+        if (chunks.length > 1 && i < chunks.length - 1) {
+            await new Promise(r => setTimeout(r, 300)); // small delay between chunks
+        }
     }
 }
 
-const invokeWithTimeout = async (messages: any[], mode?: string, options?: any) => {
+const invokeWithTimeout = async (messages: any[], mode?: string, options?: any, parentSignal?: AbortSignal, reqId?: string) => {
     const controller = new AbortController();
-    const timeoutMs = 120000;
+    const timeoutMs = 45000; // 45s LLM timeout
     let timer: NodeJS.Timeout;
     const timeoutPromise = new Promise((_, reject) => {
         timer = setTimeout(() => {
@@ -83,35 +153,102 @@ const invokeWithTimeout = async (messages: any[], mode?: string, options?: any) 
         }, timeoutMs);
     });
 
-    const mergedOptions = { ...options, signal: controller.signal };
+    if (parentSignal) {
+        if (parentSignal.aborted) {
+            clearTimeout(timer!);
+            throw new Error('FLOW_ABORTED');
+        }
+        parentSignal.addEventListener('abort', () => controller.abort(), { once: true });
+    }
+
+    const mergedOptions = { ...options, signal: controller.signal, reqId };
+    const tStart = Date.now();
 
     try {
-        return await Promise.race([
+        const result = await Promise.race([
             ModelRouter.getInstance().invokeWithRetry(messages, mode, mergedOptions),
             timeoutPromise,
         ]);
+        const latency = Date.now() - tStart;
+        if (reqId) {
+            console.log(`[StructuredLog] [RequestId:${reqId}] [Event:LLMInvoke] [Mode:${mode || "agent"}] [LatencyMs:${latency}] [Status:Success]`);
+        }
+        return result;
+    } catch (err: any) {
+        const latency = Date.now() - tStart;
+        if (reqId) {
+            console.warn(`[StructuredLog] [RequestId:${reqId}] [Event:LLMInvoke] [Mode:${mode || "agent"}] [LatencyMs:${latency}] [Status:Failed] [Error:${err.message}]`);
+        }
+        throw err;
     } finally {
         clearTimeout(timer!);
     }
 };
 
-export const executeAutonomousFlow = async (input: string, chatId?: string | number, isPhoto?: boolean, replyFn?: any, photoLink?: string, isRetry?: boolean) => {
+/**
+ * Sanitizes user-facing output by removing unparsed internal tool-call JSON blocks
+ * unless the user explicitly requested raw JSON formatting.
+ */
+export function cleanUserFacingResponse(text: string, userPrompt: string): string {
+    if (!text || typeof text !== "string") return "";
+
+    const userWantsRawJson = /\b(return json|in json|raw json|output json|as json)\b/i.test(userPrompt);
+    if (userWantsRawJson) {
+        return text;
+    }
+
+    let cleaned = text;
+
+    // Remove markdown code blocks containing internal tool-call JSON
+    cleaned = cleaned.replace(/```(?:json)?\s*\{[\s\S]*?"(?:tool|tool_name|action|name)"\s*:\s*"?(?:scrape_website|browser|coding|research|write_sandbox_file|web_search|local_file_system|run_sandbox_code)"[\s\S]*?\}\s*```/gi, "");
+
+    // Remove unfenced raw JSON objects containing internal tool-call JSON
+    cleaned = cleaned.replace(/\{\s*"(?:tool|tool_name|action|name)"\s*:\s*"?(?:scrape_website|browser|coding|research|write_sandbox_file|web_search|local_file_system|run_sandbox_code)"[\s\S]*?\}/gi, "");
+
+    // Remove excessive empty lines
+    cleaned = cleaned.replace(/\n{3,}/g, "\n\n").trim();
+
+    return cleaned || text;
+}
+
+export const executeAutonomousFlow = async (input: string, chatId?: string | number, isPhoto?: boolean, replyFn?: any, photoLink?: string, isRetry?: boolean, parentSignal?: AbortSignal, requestId?: string, progressFn?: (msg: string) => Promise<void>) => {
+    let hasReplied = false;
+    const safeReply = async (text: string) => {
+        if (hasReplied || parentSignal?.aborted) {
+            console.log(`[StructuredLog] [RequestId:${requestId || "N/A"}] [Event:LateOrDuplicateReplySuppressed] [Aborted:${!!parentSignal?.aborted}] [AlreadyReplied:${hasReplied}]`);
+            return;
+        }
+        hasReplied = true;
+        if (replyFn) {
+            const sanitizedText = cleanUserFacingResponse(text, input);
+            await replyFn(sanitizedText);
+        }
+    };
+
     try {
         const persona = PERSONALITIES[activePersonality];
         DashboardLogger.log(`[Persona] Active: ${persona.label}`);
         DashboardLogger.log(`[Flow] Step 1: Processing interaction for ${chatId}`);
+
+        if (parentSignal?.aborted) {
+            throw new Error("FLOW_ABORTED");
+        }
 
         const tStart = Date.now();
         DashboardLogger.log(`[Flow] Step 2: Retrieving context across 4 memory layers...`);
         let context = "";
         const tMemStart = Date.now();
         try {
-            context = await memory.getContext(input, chatId?.toString() || 'default');
+            context = await memory.getContext(input, chatId?.toString() || 'default', parentSignal);
         } catch (e: any) {
             context = "No previous context available.";
         }
         const tMemEnd = Date.now();
         DashboardLogger.log(`[Memory] Retrieval: ${tMemEnd - tMemStart}ms`);
+
+        if (parentSignal?.aborted) {
+            throw new Error("FLOW_ABORTED");
+        }
 
         const simpleGreetings = ['hi', 'hello', 'hey', 'thanks', 'ok', 'okay', 'bye', 'good morning', 'good night'];
         const isSimpleMessage = simpleGreetings.some(g => input.toLowerCase().trim() === g);
@@ -124,23 +261,136 @@ export const executeAutonomousFlow = async (input: string, chatId?: string | num
                 new HumanMessage(input)
             ];
 
-            const response: any = await invokeWithTimeout(simpleMessages, "simple");
+            const response: any = await invokeWithTimeout(simpleMessages, "simple", {}, parentSignal, requestId);
             const replyText = (response.content as string) || "Hello! How can I help you today?";
 
-            await replyFn(replyText);
-            memory.addInteraction(input, replyText, chatId?.toString() || 'default')
+            if (parentSignal?.aborted) throw new Error("FLOW_ABORTED");
+            await safeReply(replyText);
+            if (!parentSignal?.aborted) {
+                memory.addInteraction(input, replyText, chatId?.toString() || 'default')
+                    .catch(err => console.warn("[Memory] Background interaction persistence warning:", err.message));
+            }
+            Telemetry.broadcast("status_update", { event: "flow_complete" });
+            return;
+        }
+
+        // ◄── SUB-AGENT DELEGATION (Phase 7 & 8: Multi-Agent & File Operations) ──►
+        // Evaluated BEFORE single-tool search bypass to avoid hijacking multi-step requests
+        const lowerInputStr = input.toLowerCase();
+        const isCodingFileTask = (
+            (lowerInputStr.includes("create") || lowerInputStr.includes("write") || lowerInputStr.includes("generate") || lowerInputStr.includes("make") || lowerInputStr.includes("save")) &&
+            (lowerInputStr.includes("file") || lowerInputStr.includes(".ts") || lowerInputStr.includes(".js") || lowerInputStr.includes("script") || lowerInputStr.includes("sandbox") || lowerInputStr.includes("code"))
+        );
+        const isMultiAgentTask = (
+            (lowerInputStr.includes("research") && (lowerInputStr.includes("code") || lowerInputStr.includes("script") || lowerInputStr.includes("write") || lowerInputStr.includes("browse") || lowerInputStr.includes("example") || lowerInputStr.includes("report") || lowerInputStr.includes("save"))) ||
+            (lowerInputStr.includes("browse") && (lowerInputStr.includes("code") || lowerInputStr.includes("example") || lowerInputStr.includes("save") || lowerInputStr.includes("generate") || lowerInputStr.includes("report"))) ||
+            lowerInputStr.includes("multi-step") ||
+            lowerInputStr.includes("multi-agent") ||
+            lowerInputStr.includes("combined report") ||
+            lowerInputStr.includes("delegate") ||
+            isCodingFileTask
+        );
+
+        const isSingleCodingTask = isCodingFileTask &&
+            !lowerInputStr.includes("research") &&
+            !lowerInputStr.includes("browse") &&
+            !lowerInputStr.includes("documentation") &&
+            !lowerInputStr.includes("docs") &&
+            !lowerInputStr.includes("multi-step") &&
+            !lowerInputStr.includes("compare") &&
+            !lowerInputStr.includes("http") &&
+            !lowerInputStr.includes("report");
+
+        // ◄── SINGLE FILE-CREATION / CODING DIRECT DELEGATION ──►
+        if (isSingleCodingTask && !isPhoto) {
+            DashboardLogger.log(`[OmniSubAgent] SINGLE CODING FILE CREATION DETECTED — Delegating directly to CodingSubAgent without multi-agent wave overhead.`);
+            if (progressFn) await progressFn(`🤖 _Generating code and saving file to sandbox..._`).catch(() => {});
+            if (requestId) {
+                console.log(`[StructuredLog] [RequestId:${requestId}] [Event:SingleCodingDelegation] [Action:DirectCodingSubAgent]`);
+            }
+
+            const fileMatch = input.match(/(?:named|called|file|into|save|create)\s+([a-zA-Z0-9_\-]+\.(?:ts|js|json|txt|py))/i) ||
+                              input.match(/([a-zA-Z0-9_\-]+\.(?:ts|js|json|txt|py))/i);
+            const fileName = fileMatch ? fileMatch[1] : undefined;
+
+            const codingTask: ACPTask = {
+                taskId: `task_code_${Date.now()}`,
+                parentId: `single_coding_${Date.now()}`,
+                targetAgent: 'coding',
+                taskDescription: input,
+                contextPayload: { originalPrompt: input, fileName },
+                maxDepth: 1,
+                dependsOn: []
+            };
+
+            const result = await SubAgentManager.getInstance().delegateTask(codingTask);
+            const finalResponse = result.status === 'SUCCESS'
+                ? result.resultData
+                : `⚠️ [CodingSubAgent Incomplete/Failed]: ${result.error || 'Execution did not complete successfully'}`;
+
+            if (parentSignal?.aborted) throw new Error("FLOW_ABORTED");
+            await safeReply(finalResponse);
+            memory.addInteraction(input, finalResponse, chatId?.toString() || 'default')
                 .catch(err => console.warn("[Memory] Background interaction persistence warning:", err.message));
             Telemetry.broadcast("status_update", { event: "flow_complete" });
             return;
         }
 
-        // ◄── DIRECT SEARCH FAST-PATH ──►
-        const searchKeywords = ["search", "find", "latest news", "google", "look up", "news"];
-        const lowerInput = input.toLowerCase().trim();
-        const isSearchQuery = searchKeywords.some(kw => lowerInput.includes(kw));
+        // ◄── MULTI-AGENT DELEGATION (Multi-Step / Research + Browse + Coding) ──►
+        if (isMultiAgentTask && !isPhoto) {
+            DashboardLogger.log(`[OmniSubAgent] MULTI-AGENT / CODING DELEGATION DETECTED — Dispatching via SubAgentManager & ACP Protocol.`);
+            if (progressFn) await progressFn(`🤖 _Dispatching specialized Multi-Agent SubAgents with dependency resolution..._`).catch(() => {});
+            if (requestId) {
+                console.log(`[StructuredLog] [RequestId:${requestId}] [Event:SubAgentDelegation] [Type:MultiAgent]`);
+            }
+            const tools = SkillRegistry.getTools();
+            const toolNames = tools.map((t: any) => t.name);
+            const plan = await generateSmartPlan(input, toolNames, parentSignal);
+
+            const acpTasks = decomposeIntoACPTasks(input, plan ? JSON.stringify(plan) : undefined);
+            const workerResults = await SubAgentManager.getInstance().delegateTasksWithDependencies(acpTasks);
+
+            const reportSections = workerResults.map(res => {
+                const agentName = (res.targetAgent || 'worker').toLowerCase();
+                let sectionBanner = "";
+                if (agentName === "research") {
+                    sectionBanner = "🔬 **STAGE 1: RESEARCH & LIVE INTELLIGENCE**\n";
+                } else if (agentName === "browser") {
+                    sectionBanner = "🌐 **STAGE 2: DOCUMENTATION & LIVE BROWSING**\n";
+                } else if (agentName === "coding") {
+                    sectionBanner = "💻 **STAGE 3: CODE GENERATION & SANDBOX VERIFICATION**\n";
+                } else {
+                    sectionBanner = `⚙️ **WORKER: ${agentName.toUpperCase()}**\n`;
+                }
+
+                if (res.status === 'SUCCESS') {
+                    return `${sectionBanner}${res.resultData}`;
+                }
+                return `${sectionBanner}⚠️ [${agentName.toUpperCase()} Task Incomplete/Failed]: ${res.error || 'Execution did not complete successfully'}`;
+            });
+
+            const header = `📋 **OpenClaw Echo Multi-Agent Execution Report**\n\n`;
+            const finalResponse = header + reportSections.join('\n\n═══════════════════════════════════════\n\n');
+            if (parentSignal?.aborted) throw new Error("FLOW_ABORTED");
+            await safeReply(finalResponse);
+            memory.addInteraction(input, finalResponse, chatId?.toString() || 'default')
+                .catch(err => console.warn("[Memory] Background interaction persistence warning:", err.message));
+            Telemetry.broadcast("status_update", { event: "flow_complete" });
+            return;
+        }
+
+        // ◄── DIRECT SEARCH FAST-PATH (Single-action pure search queries only) ──►
+        const isSearchQuery = /\b(search|find|latest news|google|look up|what is the latest)\b/i.test(lowerInputStr) &&
+            !lowerInputStr.includes("code") &&
+            !lowerInputStr.includes("browse") &&
+            !lowerInputStr.includes("script") &&
+            !lowerInputStr.includes("file") &&
+            !lowerInputStr.includes("save") &&
+            !lowerInputStr.includes("generate");
 
         if (isSearchQuery && !isPhoto) {
             DashboardLogger.log(`[SearchFastPath] DIRECT SEARCH FAST-PATH DETECTED — Bypassing planner & invoking web_search tool directly.`);
+            if (progressFn) await progressFn("🔍 _Searching the web for latest updates..._").catch(() => {});
             const webSearchTool = SkillRegistry.getToolByName("web_search");
             let rawSearchResults = "";
             if (webSearchTool) {
@@ -166,14 +416,15 @@ ${context}`;
 
             let replyText = "";
             try {
-                const response: any = await invokeWithTimeout(searchMessages, "search_fastpath");
+                const response: any = await invokeWithTimeout(searchMessages, "search_fastpath", {}, parentSignal, requestId);
                 replyText = (response.content as string) || rawSearchResults;
             } catch (sErr: any) {
                 console.warn("[SearchFastPath] Gemini synthesis timed out or failed. Sending clean formatted search results directly.");
                 replyText = rawSearchResults;
             }
 
-            await replyFn(replyText);
+            if (parentSignal?.aborted) throw new Error("FLOW_ABORTED");
+            await safeReply(replyText);
             memory.addInteraction(input, replyText, chatId?.toString() || 'default')
                 .catch(err => console.warn("[Memory] Background interaction persistence warning:", err.message));
             Telemetry.broadcast("status_update", { event: "flow_complete" });
@@ -182,38 +433,17 @@ ${context}`;
 
         DashboardLogger.log(`[Flow] Step 3: Invoking ModelRouter...`);
 
-        const tools = SkillRegistry.getTools();
+        const toolSelection = ToolSelector.selectTools(input);
+        const tools = toolSelection.tools;
         const toolNames = tools.map((t: any) => t.name);
-        const plan = await generateSmartPlan(input, toolNames);
+        DashboardLogger.log(`[ToolSelector] Category: ${toolSelection.category} | Tools: ${tools.length} (~${toolSelection.tokenEstimate} tokens) | ${toolSelection.reason}`);
+        if (requestId) {
+            console.log(`[StructuredLog] [RequestId:${requestId}] [ToolSelector:Category=${toolSelection.category}] [ToolsCount=${tools.length}] [TokenEstimate=${toolSelection.tokenEstimate}]`);
+        }
+        const plan = await generateSmartPlan(input, toolNames, parentSignal);
         let planText = "";
         if (plan) {
             planText = formatPlanForPrompt(plan);
-        }
-
-        // ◄── SUB-AGENT DELEGATION FAST-PATH (Phase 7 & 8) ──►
-        const lowerInputStr = input.toLowerCase();
-        const isMultiAgentTask = (
-            (lowerInputStr.includes("research") && (lowerInputStr.includes("code") || lowerInputStr.includes("script") || lowerInputStr.includes("write"))) ||
-            lowerInputStr.includes("multi-step") ||
-            lowerInputStr.includes("delegate")
-        );
-
-        if (isMultiAgentTask && !isPhoto) {
-            DashboardLogger.log(`[OmniSubAgent] MULTI-AGENT DELEGATION DETECTED — Dispatching via SubAgentManager & ACP Protocol.`);
-            const acpTasks = decomposeIntoACPTasks(input, plan ? JSON.stringify(plan) : undefined);
-            const workerResults = await SubAgentManager.getInstance().delegateTasksParallel(acpTasks);
-
-            const finalReply = workerResults.map(res => {
-                if (res.status === 'SUCCESS') return res.resultData;
-                return `⚠️ [${(res.targetAgent || 'WORKER').toUpperCase()} Task Failed]: ${res.error || 'Unknown error'}`;
-            }).join('\n\n---\n\n');
-
-            const finalResponse = finalReply || "Sub-agent delegation completed successfully.";
-            await replyFn(finalResponse);
-            memory.addInteraction(input, finalResponse, chatId?.toString() || 'default')
-                .catch(err => console.warn("[Memory] Background interaction persistence warning:", err.message));
-            Telemetry.broadcast("status_update", { event: "flow_complete" });
-            return;
         }
 
         let messageContent: any = input;
@@ -224,14 +454,15 @@ ${context}`;
             ];
         }
 
-        let systemPromptText = `CRITICAL INSTRUCTION:
-Before using ANY tool, check your memory context above.
-If the answer exists in KNOWN FACTS or RECENT HISTORY,
-answer directly from memory WITHOUT calling any tool.
-Only use tools when memory does not have the answer.
-Never use local_file_system to answer questions about
-your own identity, project name, or user information —
-this information is already in your memory context.
+        let systemPromptText = `CRITICAL INSTRUCTIONS:
+1. CAPABILITIES & TOOL USAGE:
+   - You must NEVER claim you lack an ability that exists in your tool registry.
+   - When asked to run or execute JavaScript, TypeScript, or code: You MUST run it to completion and report the stdout result. First call write_sandbox_file to save the code into the sandbox (e.g. 'run.js'), then in the next step you MUST call run_sandbox_code on that file to execute it and return the script output to the user. Do not stop after writing the file.
+   - For goals, milestones, or objectives, you MUST call manage_project_goals (action: 'create' or 'add' to save, action: 'list' to read). Always list the exact titles of the recorded goals (e.g. "finish testing") from the database tool output. NEVER guess or answer from general memory.
+   - For saved facts or knowledge, you MUST read from get_all_knowledge or search_memory. NEVER guess.
+2. MEMORY CONTEXT:
+   - Before using external tools for basic conversational queries, check your memory context above.
+   - Never use local_file_system to answer questions about your own identity, project name, or user information — this information is already in your memory context.
 
 You are OpenClaw Echo, a helpful AI assistant.
 Be brief and direct. Max 2-3 sentences.
@@ -248,27 +479,66 @@ Context: ${context}`;
         DashboardLogger.log(`[Flow] Step 4: Executing autonomous cycle...`);
         let finalResponse = "";
         let iterations = 0;
-        const MAX_ITERATIONS = 15;
+        const MAX_ITERATIONS = 8;
         let recoveryAttempts = 0;
         const MAX_RECOVERY_ATTEMPTS = 2;
 
         while (iterations < MAX_ITERATIONS) {
+            if (parentSignal?.aborted) {
+                throw new Error("FLOW_ABORTED");
+            }
             const logic = isPhoto ? "image_analysis" : "complex";
-            const response: any = await invokeWithTimeout(messages, "agent", { tools });
-            const tool_calls = (response as any).tool_calls || [];
+            const response: any = await invokeWithTimeout(messages, "agent", { tools }, parentSignal, requestId);
+            let tool_calls = (response as any).tool_calls || [];
+
+            // ◄── INTERCEPT TEXT-BASED TOOL CALLS (Fallback for models generating JSON in content) ──►
+            if (tool_calls.length === 0 && response?.content) {
+                const textContent = String(response.content);
+                const jsonMatch = textContent.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/) || textContent.match(/(\{[\s\S]*?"(?:name|tool|action)"[\s\S]*?\})/);
+                if (jsonMatch) {
+                    try {
+                        const parsed = JSON.parse(jsonMatch[1]);
+                        const toolName = parsed.name || parsed.tool || parsed.action || parsed.function;
+                        const toolArgs = parsed.arguments || parsed.args || parsed.parameters || parsed.input || parsed.action_input || {};
+                        const validTool = SkillRegistry.getToolByName(toolName);
+                        if (validTool) {
+                            tool_calls = [{
+                                id: `call_parsed_${Date.now()}`,
+                                name: toolName,
+                                args: typeof toolArgs === "string" ? JSON.parse(toolArgs) : toolArgs
+                            }];
+                            DashboardLogger.log(`[AutonomousCycle] Parsed text-based tool call for '${toolName}'. Executing registered tool...`);
+                        }
+                    } catch {
+                        // Not a valid tool call JSON
+                    }
+                }
+            }
 
             if (tool_calls.length > 0 && !isPhoto) {
                 messages.push(response);
                 for (const toolCall of tool_calls) {
+                    if (parentSignal?.aborted) {
+                        throw new Error("FLOW_ABORTED");
+                    }
                     const tool = SkillRegistry.getToolByName(toolCall.name);
                     if (tool) {
                         DashboardLogger.log(`[Status] Executing ${toolCall.name}...`);
+                        if (progressFn) await progressFn(`⚙️ _Executing tool ${toolCall.name}..._`).catch(() => {});
+                        if (requestId) {
+                            console.log(`[StructuredLog] [RequestId:${requestId}] [Event:ToolInvocation] [Tool:${toolCall.name}]`);
+                        }
+                        const toolStart = Date.now();
                         let output: string;
                         try {
                             output = String(await tool.invoke(toolCall.args));
                         } catch (toolErr: any) {
                             output = `Error executing tool '${toolCall.name}': ${toolErr.message || toolErr}`;
                             console.error(`[Tool Error] Failed to execute ${toolCall.name}:`, toolErr);
+                        }
+                        const toolDuration = Date.now() - toolStart;
+                        if (requestId) {
+                            console.log(`[StructuredLog] [RequestId:${requestId}] [Event:ToolResult] [Tool:${toolCall.name}] [DurationMs:${toolDuration}]`);
                         }
 
                         // ◄── HYBRID VERIFIER (LOCAL + GEMINI FALLBACK) ──►
@@ -294,51 +564,51 @@ Context: ${context}`;
                                 console.warn('[Recovery] Max recovery attempts reached — breaking loop.');
                                 finalOutput += `\n\n[RECOVERY SKIPPED: Max recovery attempts (${MAX_RECOVERY_ATTEMPTS}) reached.]`;
                             } else {
-                            recoveryAttempts++;
+                                recoveryAttempts++;
 
-                            // ◄── SELF-HEALING RECOVERY LAYER ──►
-                            const availableToolNames = tools.map((t: any) => t.name);
-                            const recovery = await determineRecoveryStrategy({
-                                userGoal: input,
-                                toolName: toolCall.name,
-                                toolArgs: toolCall.args,
-                                output: String(output),
-                                failureReason: verification.reason,
-                                availableTools: availableToolNames,
-                                attemptCount: recoveryAttempts
-                            });
+                                // ◄── SELF-HEALING RECOVERY LAYER ──►
+                                const availableToolNames = tools.map((t: any) => t.name);
+                                const recovery = await determineRecoveryStrategy({
+                                    userGoal: input,
+                                    toolName: toolCall.name,
+                                    toolArgs: toolCall.args,
+                                    output: String(output),
+                                    failureReason: verification.reason,
+                                    availableTools: availableToolNames,
+                                    attemptCount: recoveryAttempts
+                                });
 
-                            DashboardLogger.log(`[Recovery] Strategy selected: ${recovery.strategy} (${recovery.reason})`);
+                                DashboardLogger.log(`[Recovery] Strategy selected: ${recovery.strategy} (${recovery.reason})`);
 
-                            if ((recovery.strategy === "modify_args" || recovery.strategy === "alternative_tool" || recovery.strategy === "retry_same")) {
-                                const targetToolName = recovery.newToolName || toolCall.name;
-                                const targetArgs = recovery.newArgs || toolCall.args;
-                                const recoveryTool = SkillRegistry.getToolByName(targetToolName);
+                                if ((recovery.strategy === "modify_args" || recovery.strategy === "alternative_tool" || recovery.strategy === "retry_same")) {
+                                    const targetToolName = recovery.newToolName || toolCall.name;
+                                    const targetArgs = recovery.newArgs || toolCall.args;
+                                    const recoveryTool = SkillRegistry.getToolByName(targetToolName);
 
-                                if (recoveryTool) {
-                                    DashboardLogger.log(`[Recovery] Re-executing via ${targetToolName}...`);
-                                    const recoveryOutput = await recoveryTool.invoke(targetArgs);
+                                    if (recoveryTool) {
+                                        DashboardLogger.log(`[Recovery] Re-executing via ${targetToolName}...`);
+                                        const recoveryOutput = await recoveryTool.invoke(targetArgs);
 
-                                    const localRecCheck = localVerifyToolResult(targetToolName, targetArgs, String(recoveryOutput));
-                                    let reVerification: { success: boolean; reason: string };
+                                        const localRecCheck = localVerifyToolResult(targetToolName, targetArgs, String(recoveryOutput));
+                                        let reVerification: { success: boolean; reason: string };
 
-                                    if (localRecCheck.status === "pass") {
-                                        DashboardLogger.log(`[LocalVerifier] PASS — ${localRecCheck.reason}`);
-                                        reVerification = { success: true, reason: localRecCheck.reason };
-                                    } else if (localRecCheck.status === "fail") {
-                                        DashboardLogger.log(`[LocalVerifier] FAIL — ${localRecCheck.reason}`);
-                                        reVerification = { success: false, reason: localRecCheck.reason };
-                                    } else {
-                                        reVerification = await verifyStepResult(input, targetToolName, String(recoveryOutput));
+                                        if (localRecCheck.status === "pass") {
+                                            DashboardLogger.log(`[LocalVerifier] PASS — ${localRecCheck.reason}`);
+                                            reVerification = { success: true, reason: localRecCheck.reason };
+                                        } else if (localRecCheck.status === "fail") {
+                                            DashboardLogger.log(`[LocalVerifier] FAIL — ${localRecCheck.reason}`);
+                                            reVerification = { success: false, reason: localRecCheck.reason };
+                                        } else {
+                                            reVerification = await verifyStepResult(input, targetToolName, String(recoveryOutput));
+                                        }
+
+                                        if (reVerification.success) {
+                                            finalOutput = String(recoveryOutput);
+                                            console.log(`[Recovery] ✅ Inline recovery succeeded!`);
+                                        } else {
+                                            finalOutput += `\n\n[RECOVERY ATTEMPTED: Tried ${targetToolName} via ${recovery.strategy}. Reason: ${reVerification.reason}]`;
+                                        }
                                     }
-
-                                    if (reVerification.success) {
-                                        finalOutput = String(recoveryOutput);
-                                        console.log(`[Recovery] ✅ Inline recovery succeeded!`);
-                                    } else {
-                                        finalOutput += `\n\n[RECOVERY ATTEMPTED: Tried ${targetToolName} via ${recovery.strategy}. Reason: ${reVerification.reason}]`;
-                                    }
-                                }
                                 } else {
                                     finalOutput += `\n\n[VERIFICATION NOTE: This result may not fully satisfy the goal. Reason: ${verification.reason}. Recovery recommendation: ${recovery.strategy} - ${recovery.reason}]`;
                                 }
@@ -360,7 +630,12 @@ Context: ${context}`;
         }
 
         DashboardLogger.log(`[Flow] Step 5: Replying...`);
-        await replyFn(finalResponse);
+        // Guard: ensure we always send something even if the loop produced no content
+        if (!finalResponse || finalResponse.trim() === "") {
+            finalResponse = "I processed your request but wasn't able to generate a complete response. Please try rephrasing or breaking it into smaller steps.";
+        }
+        if (parentSignal?.aborted) throw new Error("FLOW_ABORTED");
+        await safeReply(finalResponse);
 
         DashboardLogger.log(`[Flow] Step 6: Persisting interaction across 4 memory layers...`);
         memory.addInteraction(input, finalResponse, chatId?.toString() || 'default')
@@ -369,18 +644,29 @@ Context: ${context}`;
         Telemetry.broadcast("status_update", { event: "flow_complete" });
 
     } catch (error: any) {
+        const msg = error.message || "";
+        if (parentSignal?.aborted || msg.includes("FLOW_ABORTED") || msg.includes("Request aborted")) {
+            console.log(`[StructuredLog] [RequestId:${requestId || "N/A"}] [Event:FlowCancelled] [Reason:AbortedOrTimedOut]`);
+            return;
+        }
+
+        if (hasReplied) {
+            console.log(`[StructuredLog] [RequestId:${requestId || "N/A"}] [Event:CatchErrorSuppressed] [Reason:ReplyAlreadySent]`);
+            return;
+        }
+
         console.error("[Fatal]", error.status || "N/A", error.message);
         DashboardLogger.log(`[Fatal] Flow Error Logic: ${error.message}`);
 
-        const msg = error.message || "";
         const isRateLimit = msg.includes("429") || error.status === 429 || msg.toLowerCase().includes("too many requests");
         const isHardQuota = isRateLimit && (msg.toLowerCase().includes("quota") || msg.toLowerCase().includes("limit"));
         const isTimeout = msg.includes("503") || error.status === 503 || msg.toLowerCase().includes("timeout");
 
-        if (isRateLimit && !isRetry && !isHardQuota) {
+        if (isRateLimit && !isRetry && !isHardQuota && !parentSignal?.aborted) {
             DashboardLogger.log("[Status] Transient rate limit detected. Waiting 2s for retry...");
             await new Promise(resolve => setTimeout(resolve, 2000));
-            return executeAutonomousFlow(input, chatId, isPhoto, replyFn, photoLink, true);
+            if (parentSignal?.aborted) return;
+            return executeAutonomousFlow(input, chatId, isPhoto, safeReply, photoLink, true, parentSignal, requestId, progressFn);
         }
 
         let userFeedback = "⚠️ Service temporarily busy. Please try again in a few moments.";
@@ -399,9 +685,10 @@ Context: ${context}`;
             userFeedback = "⚠️ Model service unavailable. Please retry your query.";
         }
 
-        await replyFn(userFeedback);
+        await safeReply(userFeedback);
     }
 }
+
 
 export function splitMessage(text: string, maxLength: number = 4000): string[] {
     const chunks: string[] = [];
@@ -422,9 +709,15 @@ export function splitMessage(text: string, maxLength: number = 4000): string[] {
 async function telegramHandler(ctx: Context) {
     if (!ctx.message) return;
 
+    const updateId = ctx.update?.update_id ?? "unknown";
+    const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    console.log(`[DIAG:${requestId}] 1. Telegram update received (UpdateID: ${updateId})`);
+    console.log(`[DIAG:${requestId}] 2. telegramHandler started`);
+
     const input = (ctx.message as any).text || (ctx.message as any).caption || "Analyze this image.";
     const isPhoto = !!(ctx.message as any).photo;
     let photoLink = undefined;
+    console.log(`[DIAG:${requestId}] 3. user message extracted (Length: ${input.length}, IsPhoto: ${isPhoto})`);
 
     if (isPhoto) {
         const photo = (ctx.message as any).photo[(ctx.message as any).photo.length - 1];
@@ -442,7 +735,14 @@ async function telegramHandler(ctx: Context) {
     // 1. Strict Fast-Path Intent Classification
     const isGreeting = /^(hi|hello|hey|how are you|ping|test)[\s!.,?]*$/i.test(input.trim());
     if (isGreeting && !isPhoto) {
-        await ctx.reply("Hello! I am OpenClaw Echo. My tools and agents are online. How can I help you today?");
+        console.log(`[DIAG:${requestId}] 8. final response generated (Greeting fast-path)`);
+        console.log(`[DIAG:${requestId}] 9. ctx.reply/sendMessage started (Greeting)`);
+        try {
+            await ctx.reply("Hello! I am OpenClaw Echo. My tools and agents are online. How can I help you today?");
+            console.log(`[DIAG:${requestId}] 10. Telegram response successfully sent (Greeting replied)`);
+        } catch (greetingErr: any) {
+            console.error(`[DIAG:${requestId}] Failed to reply to greeting:`, greetingErr.message);
+        }
         return;
     }
 
@@ -461,75 +761,162 @@ async function telegramHandler(ctx: Context) {
         console.error("Failed to send initial status message:", e);
     }
 
+    const flowAbortController = new AbortController();
+    let hasDispatchedFinalReply = false;
+    console.log(`[StructuredLog] [RequestId:${requestId}] [Event:IncomingMessage] [ChatId:${ctx.chat?.id}]`);
+
     try {
         let isFirstReply = true;
 
-        // FIX 4B: 60-second flow timeout
+        // Flow timeout — cancels background work at 90s
         const flowTimeout = new Promise<string>((resolve) =>
             setTimeout(() => resolve(
-                "⏳ I'm still working on your request — this is a complex task and I need a bit more time. Please send your message again and I'll try a faster approach."
-            ), 180000)
+                "⏳ This task exceeded the 90-second execution window and was cancelled to preserve resources. For complex coding tasks, try breaking them into smaller steps."
+            ), 90000)
         );
 
         const replyHandler = async (finalResponse: string) => {
-                if (isFirstReply && statusMessageId !== null) {
-                    isFirstReply = false;
+            if (hasDispatchedFinalReply) {
+                console.log(`[StructuredLog] [RequestId:${requestId}] [Event:DuplicateReplySuppressed]`);
+                return;
+            }
+            hasDispatchedFinalReply = true;
+            console.log(`[DIAG:${requestId}] 8. final response generated (Length: ${finalResponse.length})`);
+            console.log(`[DIAG:${requestId}] 9. ctx.reply/sendMessage started (Target: ${statusMessageId ? "editMessageText" : "sendMessage"})`);
+            let deliveryStatus = "failed";
+
+            const MAX_CHUNK = 3800;
+            const isTooLong = finalResponse.length > MAX_CHUNK;
+
+            if (isFirstReply && statusMessageId !== null) {
+                isFirstReply = false;
+                if (isTooLong) {
+                    // Response exceeds single message limit: edit progress message with short completion status,
+                    // then deliver the response in ordered chunks.
+                    const completionStatus = "✅ *Task Completed Successfully!*\n\n_Full response delivered in ordered parts below:_";
                     try {
                         await ctx.telegram.editMessageText(
                             ctx.chat?.id,
                             statusMessageId,
                             undefined,
-                            finalResponse.length <= 3800 ? finalResponse : finalResponse.substring(0, 3800),
+                            completionStatus,
                             { parse_mode: "Markdown" }
                         );
-                        if (finalResponse.length > 3800) {
-                            await safeSend(ctx, finalResponse.substring(3800));
-                        }
-                    } catch (err: any) {
-                        const errMsg = err.message || "";
-                        if (errMsg.includes("message is not modified")) {
-                            // Ignore
-                        } else if (errMsg.includes("can't parse entities")) {
+                        deliveryStatus = "status_edited_with_short_completion";
+                    } catch (editErr: any) {
+                        const errMsg = editErr?.message || "";
+                        if (!errMsg.includes("message is not modified")) {
+                            console.warn(`[TelegramAPI] Markdown edit failed for status message: ${errMsg}. Retrying plain text.`);
                             try {
                                 await ctx.telegram.editMessageText(
                                     ctx.chat?.id,
                                     statusMessageId,
                                     undefined,
-                                    finalResponse.length <= 3800 ? finalResponse : finalResponse.substring(0, 3800)
+                                    "✅ Task Completed Successfully!\n\nDelivering full response in ordered parts below:"
                                 );
-                                if (finalResponse.length > 3800) {
-                                    await safeSend(ctx, finalResponse.substring(3800));
-                                }
-                            } catch (innerErr) {
-                                await safeSend(ctx, finalResponse);
+                                deliveryStatus = "status_edited_plain_fallback";
+                            } catch (plainErr: any) {
+                                console.error(`[TelegramAPI] Failed plain text edit of status message: ${plainErr?.message}`);
                             }
-                        } else {
-                            await safeSend(ctx, finalResponse);
                         }
                     }
-                } else {
+
+                    // Send the complete response in ordered chunks
                     await safeSend(ctx, finalResponse);
+                    deliveryStatus += "_and_ordered_chunks_sent";
+                } else {
+                    // Response fits in single message: edit status message directly
+                    try {
+                        await ctx.telegram.editMessageText(
+                            ctx.chat?.id,
+                            statusMessageId,
+                            undefined,
+                            finalResponse,
+                            { parse_mode: "Markdown" }
+                        );
+                        deliveryStatus = "edited_status_message";
+                    } catch (err: any) {
+                        const errMsg = err?.message || "";
+                        if (errMsg.includes("message is not modified")) {
+                            deliveryStatus = "unchanged";
+                        } else {
+                            console.warn(`[TelegramAPI] Markdown edit failed (${errMsg}). Retrying plain text.`);
+                            try {
+                                await ctx.telegram.editMessageText(
+                                    ctx.chat?.id,
+                                    statusMessageId,
+                                    undefined,
+                                    finalResponse
+                                );
+                                deliveryStatus = "edited_plain";
+                            } catch (innerErr: any) {
+                                console.error(`[TelegramAPI] Plain text edit failed: ${innerErr?.message}. Sending as new message.`);
+                                await safeSend(ctx, finalResponse);
+                                deliveryStatus = "fallback_sent";
+                            }
+                        }
+                    }
                 }
+            } else {
+                await safeSend(ctx, finalResponse);
+                deliveryStatus = "new_message_sent";
+            }
+
+            console.log(`[StructuredLog] [RequestId:${requestId}] [TelegramDelivery:${deliveryStatus}]`);
+            console.log(`[DIAG:${requestId}] 10. Telegram response successfully sent (Delivery: ${deliveryStatus})`);
         };
 
+        const progressHandler = async (progressText: string) => {
+            if (hasDispatchedFinalReply || flowAbortController.signal.aborted) return;
+            if (statusMessageId !== null) {
+                try {
+                    await ctx.telegram.editMessageText(
+                        ctx.chat?.id,
+                        statusMessageId,
+                        undefined,
+                        progressText,
+                        { parse_mode: "Markdown" }
+                    );
+                } catch {
+                    // Suppress progress edit errors (e.g. text identical)
+                }
+            }
+        };
+
+        console.log(`[DIAG:${requestId}] 4. agent invocation started`);
         const flowPromise = executeAutonomousFlow(
             input,
             String(ctx.chat?.id),
             isPhoto,
             replyHandler,
-            photoLink
+            photoLink,
+            false,
+            flowAbortController.signal,
+            requestId,
+            progressHandler
         );
 
-        // Race: flow vs 60s timeout
+        // Race: flow vs 90s timeout
         const timeoutResult = await Promise.race([
-            flowPromise.then(() => null),
+            flowPromise.then(() => null).catch((err: any) => {
+                console.error("[telegramHandler] flowPromise error:", err.message);
+                return `⚠️ An error occurred processing your request: ${err.message}`;
+            }),
             flowTimeout
         ]);
 
         if (timeoutResult !== null) {
-            // Flow timed out — send timeout message
+            flowAbortController.abort();
+            console.warn(`[StructuredLog] [RequestId:${requestId}] [TimeoutReason:${timeoutResult.includes("exceeded") ? "FlowTimeout90s" : "FlowError"}] [Action:Cancelled]`);
             await replyHandler(timeoutResult);
+        } else if (!hasDispatchedFinalReply) {
+            await replyHandler("⚠️ The requested operation completed, but did not return a final response. Please retry.");
         }
+    } catch (handlerErr: any) {
+        console.error(`[telegramHandler] Unhandled error during request ${requestId}:`, handlerErr?.message || handlerErr);
+        try {
+            await ctx.reply(`⚠️ An error occurred while processing your message: ${handlerErr?.message || "Unknown error"}`);
+        } catch { }
     } finally {
         clearInterval(typingInterval);
     }
@@ -883,6 +1270,10 @@ app.get("/health", (req: Request, res: Response) => {
     res.status(200).send("OK");
 });
 
+app.get("/api/status", (req: Request, res: Response) => {
+    res.status(200).json({ status: "online", bot: isBotRunning ? "polling" : "idle", uptime: Math.floor(process.uptime()) });
+});
+
 app.get("*", (req: Request, res: Response) => {
     res.sendFile(path.join(dashboardPath, "index.html"), (err) => {
         if (err) res.status(404).send("Dashboard not built.");
@@ -919,20 +1310,54 @@ export const startServer = async (initialPort?: number) => {
             await Clockwork.boot();
 
             // Connect Telegram
-            if (mode === "webhook") {
-                const WEBHOOK_URL = `${process.env.TELEGRAM_WEBHOOK_URL}${WEBHOOK_PATH}`;
-                try {
-                    await bot.telegram.setWebhook(WEBHOOK_URL, { drop_pending_updates: true });
-                    DashboardLogger.log("✅ Webhook registered.");
-                } catch (err: any) {
-                    console.error("[Telegram] Webhook setup failed:", err.message);
+            if (mode === "disabled" || mode === "off" || mode === "none") {
+                DashboardLogger.log("ℹ️ Telegram integration disabled via TELEGRAM_MODE=disabled.");
+            } else if (mode === "webhook") {
+                const webhookUrlBase = process.env.TELEGRAM_WEBHOOK_URL || (process.env.RAILWAY_STATIC_URL ? `https://${process.env.RAILWAY_STATIC_URL}` : "");
+                if (!webhookUrlBase) {
+                    console.error("[Telegram] TELEGRAM_WEBHOOK_URL missing for webhook mode.");
+                } else {
+                    const fullWebhookUrl = `${webhookUrlBase.replace(/\/+$/, '')}${WEBHOOK_PATH}`;
+                    try {
+                        await bot.telegram.setWebhook(fullWebhookUrl, { drop_pending_updates: false });
+                        DashboardLogger.log(`✅ Webhook registered: ${fullWebhookUrl}`);
+                    } catch (err: any) {
+                        console.error("[Telegram] Webhook setup failed:", err.message);
+                    }
                 }
             } else {
-                try {
-                    await bot.launch({ dropPendingUpdates: true });
-                    DashboardLogger.log("✅ Polling active.");
-                } catch (err: any) {
-                    console.error("[Telegram] Init error / Webhook conflict:", err.message);
+                if (isBotRunning) {
+                    DashboardLogger.log("ℹ️ Bot polling already active — skipping duplicate launch.");
+                } else {
+                    const startPollingWithRetry = async (retryCount = 0) => {
+                        if (isStopping) return;
+                        try {
+                            // Delete any lingering webhook to prevent 409 Conflict with getUpdates
+                            await bot.telegram.deleteWebhook({ drop_pending_updates: false }).catch(() => {});
+                            
+                            isBotRunning = true;
+                            // Launch polling in background
+                            await bot.launch({
+                                dropPendingUpdates: false,
+                                allowedUpdates: ["message", "edited_message", "callback_query"]
+                            });
+                            DashboardLogger.log("✅ Polling active.");
+                        } catch (err: any) {
+                            isBotRunning = false;
+                            const isConflict = err.message?.includes("409") || err.message?.includes("Conflict");
+                            if (isConflict) {
+                                const waitMs = Math.min(30000, 3000 * Math.pow(1.5, retryCount));
+                                console.warn(`[Telegram] ⚠️ 409 Conflict detected (another bot instance is running). Retrying in ${Math.round(waitMs)}ms (attempt ${retryCount + 1})...`);
+                                if (!isStopping) {
+                                    setTimeout(() => startPollingWithRetry(retryCount + 1), waitMs);
+                                }
+                            } else {
+                                console.error("[Telegram] Polling error / Init failure:", err.message);
+                            }
+                        }
+                    };
+
+                    startPollingWithRetry();
                 }
             }
 
@@ -947,18 +1372,39 @@ export const startServer = async (initialPort?: number) => {
     }
 };
 
-export const stopServer = async (server: any) => {
+export const stopServer = async (server: any, signal: string = "SIGTERM") => {
+    if (isStopping) return;
+    isStopping = true;
     try {
-        if (server && server.close) {
-            await new Promise((resolve) => server.close(resolve));
-        }
-        if (bot && typeof bot.stop === "function") {
+        console.log(`[Telegram] Initiating graceful shutdown (signal: ${signal})...`);
+        if (bot && typeof bot.stop === "function" && isBotRunning) {
             try {
-                await bot.stop("SIGINT");
-            } catch (e) { }
+                console.log("[Telegram] Stopping polling consumer...");
+                bot.stop(signal);
+                isBotRunning = false;
+                console.log("[Telegram] Polling consumer stopped cleanly.");
+            } catch (e: any) {
+                console.warn("[Telegram] Warning stopping bot:", e.message);
+            }
         }
+        if (server && server.close) {
+            try {
+                await new Promise((resolve) => server.close(resolve));
+                console.log("[System] HTTP server closed.");
+            } catch (e: any) {
+                console.warn("[System] Warning closing HTTP server:", e.message);
+            }
+        }
+        try {
+            Clockwork.stop();
+        } catch (e) { }
         if (memory && typeof (memory as any).close === "function") {
-            await (memory as any).close();
+            try {
+                await (memory as any).close();
+                console.log("[Memory] Database connection closed.");
+            } catch (e: any) {
+                console.warn("[Memory] Warning closing database:", e.message);
+            }
         }
     } catch (error: any) {
         console.error("[System] Error during shutdown:", error.message);

@@ -5,6 +5,7 @@ import { ModelRouter } from "../../core/router";
 import { SystemMessage, HumanMessage } from "@langchain/core/messages";
 import * as path from "path";
 import * as fs from "fs/promises";
+import * as ts from "typescript";
 import { sanitizeSandboxCode, SANDBOX_ENV, truncateSandboxOutput, validateCodeSafety } from "../../skills/tools";
 import { SANDBOX_DIR } from "../../core/storage";
 
@@ -84,9 +85,11 @@ export class CodingSubAgent implements WorkerAgent {
                 generatedCode = `\`\`\`typescript\n${generatedCode}\n\`\`\``;
             }
 
-            // 3. Syntax Validation check
-            const isValidSyntax = this.validateSyntax(generatedCode);
-            const syntaxStatus = isValidSyntax ? "Syntax Validation: PASSED ✅" : "Syntax Validation: WARNING (Unverified syntax) ⚠️";
+            // 3. Real AST Syntax Validation check
+            const syntaxResult = this.validateSyntax(generatedCode, targetFileName);
+            const syntaxStatus = syntaxResult.valid 
+                ? "AST Syntax Validation: PASSED (TypeScript parser validated AST) ✅" 
+                : `AST Syntax Validation: FAILED (${syntaxResult.error}) ❌`;
 
             // 4. Invoke Registered Tool: write_sandbox_file (if not executeOnly)
             const writeTool = SkillRegistry.getToolByName("write_sandbox_file");
@@ -232,13 +235,37 @@ export class CodingSubAgent implements WorkerAgent {
         }
     }
 
-    private validateSyntax(code: string): boolean {
-        if (!code || typeof code !== "string") return false;
-        const openBraces = (code.match(/\{/g) || []).length;
-        const closeBraces = (code.match(/\}/g) || []).length;
-        const openParens = (code.match(/\(/g) || []).length;
-        const closeParens = (code.match(/\)/g) || []).length;
-        return openBraces === closeBraces && openParens === closeParens;
+    private validateSyntax(code: string, fileName = "file.ts"): { valid: boolean; error?: string } {
+        if (!code || typeof code !== "string") return { valid: false, error: "Empty or null code provided." };
+
+        // Extract pure code without markdown fence before passing to TypeScript parser
+        const pureCode = sanitizeSandboxCode(code);
+        if (!pureCode.trim()) return { valid: false, error: "Code block contains no extractable statements." };
+
+        try {
+            const isTs = fileName.endsWith(".ts");
+            const sourceFile = ts.createSourceFile(
+                fileName,
+                pureCode,
+                ts.ScriptTarget.Latest,
+                true,
+                isTs ? ts.ScriptKind.TS : ts.ScriptKind.JS
+            );
+
+            // Extract real parser diagnostics
+            const diagnostics = (sourceFile as any).parseDiagnostics || [];
+            if (diagnostics.length > 0) {
+                const firstDiag = diagnostics[0];
+                const message = typeof firstDiag.messageText === "string" 
+                    ? firstDiag.messageText 
+                    : firstDiag.messageText?.messageText || "Syntax parsing error";
+                return { valid: false, error: `Line ${(firstDiag.start !== undefined ? sourceFile.getLineAndCharacterOfPosition(firstDiag.start).line + 1 : 1)}: ${message}` };
+            }
+
+            return { valid: true };
+        } catch (parseErr: any) {
+            return { valid: false, error: parseErr.message };
+        }
     }
 
     private generateFallbackCode(description: string): string {

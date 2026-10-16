@@ -351,15 +351,26 @@ export const executeAutonomousFlow = async (input: string, chatId?: string | num
             const workerResults = await SubAgentManager.getInstance().delegateTasksWithDependencies(acpTasks);
 
             const reportSections = workerResults.map(res => {
-                if (res.status === 'SUCCESS') return res.resultData;
-                return `⚠️ [${(res.targetAgent || 'WORKER').toUpperCase()} Task Incomplete/Failed]: ${res.error || 'Execution did not complete successfully'}`;
+                const agentName = (res.targetAgent || 'worker').toLowerCase();
+                let sectionBanner = "";
+                if (agentName === "research") {
+                    sectionBanner = "🔬 **STAGE 1: RESEARCH & LIVE INTELLIGENCE**\n";
+                } else if (agentName === "browser") {
+                    sectionBanner = "🌐 **STAGE 2: DOCUMENTATION & LIVE BROWSING**\n";
+                } else if (agentName === "coding") {
+                    sectionBanner = "💻 **STAGE 3: CODE GENERATION & SANDBOX VERIFICATION**\n";
+                } else {
+                    sectionBanner = `⚙️ **WORKER: ${agentName.toUpperCase()}**\n`;
+                }
+
+                if (res.status === 'SUCCESS') {
+                    return `${sectionBanner}${res.resultData}`;
+                }
+                return `${sectionBanner}⚠️ [${agentName.toUpperCase()} Task Incomplete/Failed]: ${res.error || 'Execution did not complete successfully'}`;
             });
 
-            const header = lowerInputStr.includes("combined report") || lowerInputStr.includes("report")
-                ? `📋 **OpenClaw Echo Combined Multi-Agent Report**\n\n`
-                : "";
-
-            const finalResponse = header + reportSections.join('\n\n---\n\n');
+            const header = `📋 **OpenClaw Echo Multi-Agent Execution Report**\n\n`;
+            const finalResponse = header + reportSections.join('\n\n═══════════════════════════════════════\n\n');
             if (parentSignal?.aborted) throw new Error("FLOW_ABORTED");
             await safeReply(finalResponse);
             memory.addInteraction(input, finalResponse, chatId?.toString() || 'default')
