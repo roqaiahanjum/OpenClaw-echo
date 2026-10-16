@@ -5,9 +5,9 @@ import * as nodemailer from "nodemailer";
  * Sends rich HTML email reports to external stakeholders.
  */
 export class Diplomat {
-    private static createTransporter() {
+    public static createTransporter() {
         const host = process.env.SMTP_HOST || "smtp.gmail.com";
-        const port = parseInt(process.env.SMTP_PORT || "587");
+        const port = parseInt(process.env.SMTP_PORT || "587", 10);
         const user = process.env.SMTP_USER;
         const pass = process.env.SMTP_PASS;
 
@@ -15,11 +15,25 @@ export class Diplomat {
             throw new Error("SMTP credentials not configured. Set SMTP_USER and SMTP_PASS in .env");
         }
 
+        // Google App Passwords are 16 characters often formatted with spaces: 'xxxx xxxx xxxx xxxx'.
+        // Strip any accidental whitespace or wrapping quotes from the password string.
+        const cleanPass = pass.replace(/\s+/g, "").replace(/^['"]|['"]$/g, "");
+
+        if (host.includes("gmail")) {
+            return nodemailer.createTransport({
+                service: "gmail",
+                auth: { user, pass: cleanPass }
+            });
+        }
+
         return nodemailer.createTransport({
             host,
             port,
             secure: port === 465,
-            auth: { user, pass }
+            auth: { user, pass: cleanPass },
+            tls: {
+                rejectUnauthorized: true
+            }
         });
     }
 

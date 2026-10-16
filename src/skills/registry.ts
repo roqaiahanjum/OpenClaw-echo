@@ -62,7 +62,7 @@ export class SkillRegistry {
      */
     static getTools() {
         if (!this.cachedTools) {
-            this.cachedTools = [...this.tools];
+            this.cachedTools = this.tools.filter(Boolean);
         }
         return this.cachedTools;
     }
@@ -80,10 +80,26 @@ export class SkillRegistry {
     }
 
     /**
+     * Unregisters a tool by name (used for cleanup or runtime dynamic unloading).
+     */
+    static unregisterTool(name: string): boolean {
+        const idx = this.tools.findIndex(t => t.name === name);
+        if (idx !== -1) {
+            this.tools.splice(idx, 1);
+            this.cachedTools = null;
+            return true;
+        }
+        return false;
+    }
+
+    /**
      * Optional: Method to get a specific tool by name.
      */
     static getToolByName(name: string) {
         const tools = this.getTools();
+        if (name === "send_email") {
+            return tools.find(tool => tool.name === "send_email_report" || tool.name === "send_email");
+        }
         return tools.find(tool => tool.name === name);
     }
 }

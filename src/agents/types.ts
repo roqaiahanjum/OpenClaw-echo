@@ -9,6 +9,7 @@ export interface ACPTask {
     taskDescription: string;
     contextPayload?: Record<string, any>;
     maxDepth?: number;
+    dependsOn?: string[];
 }
 
 export interface ACPResult {

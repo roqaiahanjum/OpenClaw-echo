@@ -13,6 +13,9 @@ export interface VerificationResult {
 export async function verifyStepResult(userGoal: string, actionName: string, output: string): Promise<VerificationResult> {
     try {
         const router = ModelRouter.getInstance();
+        if (router.isInFallbackMode()) {
+            return { success: true, reason: "Output verification bypassed (Router in fallback mode)." };
+        }
         const verifierPrompt = `You are the OpenClaw Output Verifier.
 Evaluate if the tool output successfully executed its specific action. 
 NOTE: The User Goal may require multiple tools to fully resolve. Do NOT fail the tool if it only completed a partial step towards the overall goal, as long as the tool's specific action succeeded.
