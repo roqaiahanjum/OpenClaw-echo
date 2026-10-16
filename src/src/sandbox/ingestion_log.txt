@@ -1,0 +1,1 @@
+OpenClaw Echo ingested test_basic.txt into knowledge base.

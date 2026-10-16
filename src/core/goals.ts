@@ -1,5 +1,6 @@
 import * as fs from "fs/promises";
 import * as path from "path";
+import { GOALS_STORAGE_PATH } from "./storage";
 
 export interface Goal {
     id: string;
@@ -17,7 +18,7 @@ export interface Goal {
  * Manages persistent long-term objectives for the agent.
  */
 export class GoalManager {
-    private storagePath: string = path.join(path.resolve("src/sandbox"), "goals.json");
+    private storagePath: string = GOALS_STORAGE_PATH;
 
     constructor() {
         this.initStorage();

@@ -1,5 +1,6 @@
 import * as fs from "fs/promises";
 import * as path from "path";
+import { SCHEDULES_STORAGE_PATH } from "./storage";
 
 export interface ScheduledTask {
     id: string;
@@ -17,7 +18,7 @@ export interface ScheduledTask {
  * Manages persistent recurring jobs for the agent.
  */
 export class Clockwork {
-    private static storagePath = path.join(path.resolve("src/sandbox"), "schedules.json");
+    private static storagePath = SCHEDULES_STORAGE_PATH;
     private static timers: Map<string, NodeJS.Timeout> = new Map();
     private static executeCallback: ((prompt: string) => Promise<void>) | null = null;
 

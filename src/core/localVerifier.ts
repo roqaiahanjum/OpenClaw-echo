@@ -20,16 +20,20 @@ export function localVerifyToolResult(toolName: string, args: any, output: strin
         };
     }
 
-    // Presentation Mode Sandbox Fast-path Short-circuit
+    // Presentation Mode Sandbox & Local File System Verification
     if (["run_sandbox_code", "write_sandbox_file", "local_file_system"].includes(toolName)) {
         const lowerOutput = trimmedOutput.toLowerCase();
-        const hasError = lowerOutput.includes("error") || lowerOutput.includes("safety violation") || lowerOutput.includes("exception");
-        if (!hasError) {
+        const hasError = lowerOutput.includes("error") || lowerOutput.includes("safety violation") || lowerOutput.includes("exception") || lowerOutput.includes("enoent");
+        if (hasError) {
             return {
-                status: "pass",
-                reason: "Auto-verified for presentation mode"
+                status: "fail",
+                reason: `Local verification failed: ${toolName} output reported an error ("${trimmedOutput.slice(0, 100)}")`
             };
         }
+        return {
+            status: "pass",
+            reason: "Auto-verified: Operation completed without errors"
+        };
     }
 
     // 2. Specific Rule: web_search
@@ -106,7 +110,105 @@ export function localVerifyToolResult(toolName: string, args: any, output: strin
         }
     }
 
-    // 5. Fallback for tools without deterministic rules yet
+    // 5. Specific Rule: scrape_website
+    if (toolName === "scrape_website") {
+        const lower = trimmedOutput.toLowerCase();
+        if (lower.startsWith("failed to scrape") || lower.startsWith("safety error")) {
+            return {
+                status: "fail",
+                reason: `Local verification failed: ${trimmedOutput}`
+            };
+        }
+        if (lower.startsWith("scraped content from") && trimmedOutput.length >= 20) {
+            return {
+                status: "pass",
+                reason: `Local verification passed: Successfully scraped website content (${trimmedOutput.length} chars).`
+            };
+        }
+    }
+
+    // 6. Specific Rule: manage_project_goals
+    if (toolName === "manage_project_goals") {
+        const lower = trimmedOutput.toLowerCase();
+        if (lower.startsWith("goal operation failed") || lower.includes("error:")) {
+            return {
+                status: "fail",
+                reason: `Local verification failed: ${trimmedOutput.slice(0, 150)}`
+            };
+        }
+        // Meaningful evidence: checks for operation success marker or valid JSON array/object structure
+        const hasProcessedMarker = lower.includes("goal operation '") && lower.includes("processed");
+        const hasGoalArray = lower.includes("goals summary:") && trimmedOutput.includes("[") && trimmedOutput.includes("]");
+        if (hasProcessedMarker || hasGoalArray) {
+            return {
+                status: "pass",
+                reason: `Local verification passed: Project goals operation verified with structured goals summary.`
+            };
+        }
+    }
+
+    // 7. Specific Rule: manage_git_repository
+    if (toolName === "manage_git_repository") {
+        const lower = trimmedOutput.toLowerCase();
+        if (
+            lower.startsWith("git operation failed") || 
+            lower.startsWith("unsupported git action") ||
+            lower.includes("fatal:") || 
+            lower.includes("not a git repository")
+        ) {
+            return {
+                status: "fail",
+                reason: `Local verification failed: ${trimmedOutput.slice(0, 150)}`
+            };
+        }
+        // Meaningful evidence: Git command header + legitimate git output patterns
+        const hasHeader = trimmedOutput.startsWith("Git command [");
+        const hasLegitGitOutput = 
+            lower.includes("on branch") || 
+            lower.includes("changes not staged") ||
+            lower.includes("nothing to commit") || 
+            lower.includes("feature/") || 
+            lower.includes("main") || 
+            lower.includes("master") ||
+            /^[0-9a-f]{7,40}\s+/m.test(trimmedOutput) || // commit hash in git log
+            lower.includes("files changed") || 
+            lower.includes("insertions") || 
+            lower.includes("(no output from git command)") ||
+            /^\s*(?:[MADRCU?!\s]{1,2})\s+\S+/m.test(trimmedOutput); // short git status: M file, ?? file, etc.
+
+        if (hasHeader && hasLegitGitOutput) {
+            return {
+                status: "pass",
+                reason: `Local verification passed: Git command completed with validated git status/log/diff content.`
+            };
+        }
+    }
+
+    // 8. Specific Rule: get_memory_stats
+    if (toolName === "get_memory_stats") {
+        const lower = trimmedOutput.toLowerCase();
+        if (lower.startsWith("error fetching memory stats") || lower.includes("failed")) {
+            return {
+                status: "fail",
+                reason: `Local verification failed: ${trimmedOutput.slice(0, 150)}`
+            };
+        }
+        // Meaningful evidence: Header + all 4 memory layers present with numerical values
+        const hasHeader = trimmedOutput.includes("Memory System Statistics:");
+        const hasInteractions = /Interactions:\s*\d+/i.test(trimmedOutput);
+        const hasFacts = /Knowledge Facts:\s*\d+/i.test(trimmedOutput);
+        const hasSummaries = /Summaries:\s*\d+/i.test(trimmedOutput);
+        const hasVectors = /Vector Embeddings:\s*\d+/i.test(trimmedOutput);
+
+        if (hasHeader && hasInteractions && hasFacts && hasSummaries && hasVectors) {
+            return {
+                status: "pass",
+                reason: `Local verification passed: Memory system statistics validated across all 4 layers.`
+            };
+        }
+    }
+
+    // 9. Fallback for tools without deterministic rules yet (keeps LLM verification for uncertain cases)
     return {
         status: "uncertain",
         reason: `No local deterministic verifier rule for tool '${toolName}'. Falling back to Gemini verifier.`

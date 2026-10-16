@@ -10,6 +10,7 @@ import { SystemMessage, HumanMessage } from "@langchain/core/messages";
 import { KnowledgeGraphManager } from "./KnowledgeGraphManager";
 import { extractAndStoreTriples } from "./graphExtractor";
 import { DashboardLogger } from "../core/logger";
+import { SQLITE_DB_PATH, SEMANTIC_CORE_PATH, ensureStorageDirectories } from "../core/storage";
 
 // Load .env with absolute path — works from any working directory
 dotenv.config({ 
@@ -44,16 +45,16 @@ export class MemoryManager {
     private db: sqlite3.Database;
     private vectorStore: MemoryVectorStore | null = null;
     private embeddings: GoogleGenerativeAIEmbeddings;
-    private storagePath: string = path.join(__dirname, "semantic_core.json");
+    private storagePath: string = SEMANTIC_CORE_PATH;
     private isInitialized: boolean = false;
     private embeddingCache = new Map<string, number[]>();
 
     private constructor() {
-        this.db = new sqlite3.Database("./openclaw.db", (err) => {
+        this.db = new sqlite3.Database(SQLITE_DB_PATH, (err) => {
             if (err) {
                 console.error("[Memory] SQLite Connection Error:", err.message);
             } else {
-                console.log("[Memory] SQLite Connected.");
+                console.log(`[Memory] SQLite Connected (${SQLITE_DB_PATH}).`);
             }
         });
 

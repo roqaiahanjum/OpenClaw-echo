@@ -72,9 +72,28 @@ export interface ProviderCandidate {
     modelName: string;
 }
 
+export interface RouterInvokeOptions {
+    tools?: any[];
+    signal?: AbortSignal;
+    providerTimeoutMs?: number;
+    primaryTimeoutMs?: number;
+    perProviderTimeoutMap?: Record<string, number>;
+    reqId?: string;
+    logic?: string;
+}
+
+const cleanModelName = (name: string | undefined, defaultName: string) => {
+    if (!name) return defaultName;
+    const cleaned = name.replace(/^["']|["']$/g, "").trim();
+    if (!cleaned || cleaned === "llama3-8b-8192" || cleaned === "llama-3.3-70b-versatile" || cleaned === "gemini-2.5-flash" || cleaned === "gemini-3.6-flash") return defaultName;
+    return cleaned;
+};
+
 const WATERFALL_PROVIDERS: ProviderCandidate[] = [
-    { id: "groq-llama-8b", name: "Groq Llama 8B", provider: "groq", modelName: process.env.GROQ_MODEL || "llama3-8b-8192" },
-    { id: "gemini-3.6-flash", name: "Gemini 2.5 Flash", provider: "gemini", modelName: process.env.GEMINI_MODEL || "gemini-2.5-flash" }
+    { id: "groq-fast", name: "Groq Fast", provider: "groq", modelName: cleanModelName(process.env.GROQ_MODEL, "openai/gpt-oss-20b") },
+    { id: "gemini-flash", name: "Gemini Flash", provider: "gemini", modelName: cleanModelName(process.env.GEMINI_MODEL, "gemini-3.5-flash-lite") },
+    { id: "groq-backup", name: "Groq Backup", provider: "groq", modelName: "openai/gpt-oss-120b" },
+    { id: "gemini-fallback", name: "Gemini 3.5 Flash Lite Backup", provider: "gemini", modelName: "gemini-3.5-flash-lite" }
 ];
 
 function translateMessagesToGroq(messages: any[]): Array<{ role: string; content: string }> {
@@ -152,6 +171,8 @@ function formatGeminiTool(tool: any) {
 export class ModelRouter {
     private static instance: ModelRouter;
     private groqClient: Groq | null = null;
+    private groqPrimaryClient: Groq | null = null;
+    private groqBackupClient: Groq | null = null;
 
     // Circuit Breaker & Quota Tracking State
     private failedModelsCooldown: Map<string, number> = new Map();
@@ -192,16 +213,32 @@ export class ModelRouter {
             console.error('[Router] Set GOOGLE_API_KEY in your .env file.');
         }
 
-        const groqKey =
+        const primaryGroqKey =
+            process.env.GROQ_PRIMARY_API_KEY ||
             process.env.GROQ_API_KEY ||
             process.env.GROQ_KEY;
 
-        if (groqKey) {
+        const backupGroqKey =
+            process.env.GROQ_BACKUP_API_KEY ||
+            process.env.GROQ_API_KEY ||
+            process.env.GROQ_KEY;
+
+        if (primaryGroqKey) {
             try {
-                this.groqClient = new Groq({ apiKey: groqKey });
-                console.log("[Router] 🟢 Groq SDK initialized with active API key.");
+                this.groqPrimaryClient = new Groq({ apiKey: primaryGroqKey });
+                this.groqClient = this.groqPrimaryClient;
+                console.log("[Router] 🟢 Groq Primary SDK initialized.");
             } catch (e: any) {
-                console.warn("[Router] Groq SDK initialization skipped:", e.message);
+                console.warn("[Router] Groq Primary SDK initialization skipped:", e.message);
+            }
+        }
+
+        if (backupGroqKey) {
+            try {
+                this.groqBackupClient = new Groq({ apiKey: backupGroqKey });
+                console.log("[Router] 🟢 Groq Backup SDK initialized.");
+            } catch (e: any) {
+                console.warn("[Router] Groq Backup SDK initialization skipped:", e.message);
             }
         }
     }
@@ -231,8 +268,9 @@ export class ModelRouter {
     }
 
     public isInFallbackMode(): boolean {
-        const standardCandidates = ["groq-llama-8b", "gemini-flash-2.5"];
-        return standardCandidates.every(id => this.isModelInCooldown(id));
+        const standardCandidates = ["groq-fast", "gemini-flash", "groq-backup", "gemini-fallback"];
+        const activeStandard = standardCandidates.filter(id => WATERFALL_PROVIDERS.some(p => p.id === id));
+        return activeStandard.length > 0 && activeStandard.every(id => this.isModelInCooldown(id));
     }
 
     public resetCircuitBreaker(): void {
@@ -259,14 +297,21 @@ export class ModelRouter {
      * Unified Provider Invocation
      * Executes single provider attempt with individual 30-second timeout cap.
      */
-    private async invokeProvider(candidate: ProviderCandidate, messages: any, logic?: string, options?: { tools?: any[], signal?: AbortSignal }): Promise<any> {
+    private async invokeProvider(candidate: ProviderCandidate, messages: any, logicOrOptions?: any, maybeOptions?: any): Promise<any> {
+        let logic = typeof logicOrOptions === "string" ? logicOrOptions : undefined;
+        const options: RouterInvokeOptions = (typeof logicOrOptions === "object" && logicOrOptions !== null ? logicOrOptions : maybeOptions) || {};
+        if (!logic && options.logic) {
+            logic = options.logic;
+        }
         const controller = new AbortController();
         if (options?.signal) {
             if (options.signal.aborted) {
                 throw new Error("Request aborted before starting provider");
             }
-            options.signal.addEventListener('abort', () => controller.abort());
+            options.signal.addEventListener('abort', () => controller.abort(), { once: true });
         }
+
+        const tStart = Date.now();
 
         if (candidate.provider === "gemini") {
             const apiKey =
@@ -288,30 +333,60 @@ export class ModelRouter {
                 model = model.bindTools(googleTools as any);
             }
 
+            let perProviderTimeoutMs = 25000;
+            if (options?.perProviderTimeoutMap?.[candidate.id]) {
+                perProviderTimeoutMs = options.perProviderTimeoutMap[candidate.id];
+            } else if (options?.providerTimeoutMs && !options?.primaryTimeoutMs) {
+                perProviderTimeoutMs = options.providerTimeoutMs;
+            }
             let timer: NodeJS.Timeout;
             const timeoutPromise = new Promise((_, reject) => {
                 timer = setTimeout(() => {
                     controller.abort();
-                    reject(new Error(`Gemini (${candidate.modelName}) request timed out after 120s`));
-                }, 120000);
+                    reject(new Error(`ProviderTimeoutError: Gemini (${candidate.modelName}) request timed out after ${perProviderTimeoutMs}ms`));
+                }, perProviderTimeoutMs);
             });
 
+            if (options?.reqId) {
+                console.log(`[DIAG:${options.reqId}] 6. LLM request started (Provider: gemini, Model: ${candidate.modelName})`);
+            }
             try {
-                return await Promise.race([
+                const result = await Promise.race([
                     model.invoke(messages, { signal: controller.signal }),
                     timeoutPromise
                 ]);
+                const latencyMs = Date.now() - tStart;
+                if (options?.reqId) {
+                    console.log(`[DIAG:${options.reqId}] 7. LLM response received (Provider: gemini, Latency: ${latencyMs}ms)`);
+                }
+                console.log(`[StructuredLog] [Event:ModelCall] [Provider:gemini] [Model:${candidate.modelName}] [LatencyMs:${latencyMs}] [Status:Success]`);
+                return result;
+            } catch (err: any) {
+                const latencyMs = Date.now() - tStart;
+                console.warn(`[StructuredLog] [Event:ModelCall] [Provider:gemini] [Model:${candidate.modelName}] [LatencyMs:${latencyMs}] [Status:Failed] [Error:${err.message}]`);
+                throw err;
             } finally {
                 clearTimeout(timer!);
             }
         } else if (candidate.provider === "groq") {
-            const apiKey =
-                process.env.GROQ_API_KEY ||
-                process.env.GROQ_KEY;
+            const isBackup = candidate.id === "groq-backup";
+            const apiKey = isBackup
+                ? (process.env.GROQ_BACKUP_API_KEY || process.env.GROQ_API_KEY || process.env.GROQ_KEY)
+                : (process.env.GROQ_PRIMARY_API_KEY || process.env.GROQ_API_KEY || process.env.GROQ_KEY);
             if (!apiKey) throw new Error("GROQ_API_KEY missing");
 
-            if (!this.groqClient) {
-                this.groqClient = new Groq({ apiKey });
+            let activeGroqClient: Groq;
+            if (isBackup) {
+                if (!this.groqBackupClient) {
+                    this.groqBackupClient = new Groq({ apiKey });
+                }
+                activeGroqClient = this.groqBackupClient;
+            } else {
+                if (!this.groqPrimaryClient) {
+                    this.groqPrimaryClient = new Groq({ apiKey });
+                    this.groqClient = this.groqPrimaryClient;
+                }
+                activeGroqClient = this.groqPrimaryClient;
             }
 
             const formattedMessages = translateMessagesToGroq(messages);
@@ -332,22 +407,42 @@ export class ModelRouter {
                 completionParams.tool_choice = "auto";
             }
 
-            const completionPromise = this.groqClient.chat.completions.create(completionParams, { signal: controller.signal });
+            const completionPromise = activeGroqClient.chat.completions.create(completionParams, { signal: controller.signal });
 
+            let perProviderTimeoutMs = 20000;
+            if (options?.perProviderTimeoutMap?.[candidate.id]) {
+                perProviderTimeoutMs = options.perProviderTimeoutMap[candidate.id];
+            } else if (candidate.id === "groq-fast" && options?.primaryTimeoutMs) {
+                perProviderTimeoutMs = options.primaryTimeoutMs;
+            } else if (options?.providerTimeoutMs && candidate.id === "groq-fast") {
+                perProviderTimeoutMs = options.providerTimeoutMs;
+            }
             let timer: NodeJS.Timeout;
             const timeoutPromise = new Promise((_, reject) => {
                 timer = setTimeout(() => {
                     controller.abort();
-                    reject(new Error(`Groq (${candidate.modelName}) request timed out after 90s`));
-                }, 90000);
+                    reject(new Error(`ProviderTimeoutError: Groq (${candidate.modelName}) request timed out after ${perProviderTimeoutMs}ms`));
+                }, perProviderTimeoutMs);
             });
 
+            if (options?.reqId) {
+                console.log(`[DIAG:${options.reqId}] 6. LLM request started (Provider: groq, Model: ${candidate.modelName})`);
+            }
             let response: any;
             try {
                 response = await Promise.race([
                     completionPromise,
                     timeoutPromise
                 ]);
+                const latencyMs = Date.now() - tStart;
+                if (options?.reqId) {
+                    console.log(`[DIAG:${options.reqId}] 7. LLM response received (Provider: groq, Latency: ${latencyMs}ms)`);
+                }
+                console.log(`[StructuredLog] [Event:ModelCall] [Provider:groq] [Model:${candidate.modelName}] [LatencyMs:${latencyMs}] [Status:Success]`);
+            } catch (err: any) {
+                const latencyMs = Date.now() - tStart;
+                console.warn(`[StructuredLog] [Event:ModelCall] [Provider:groq] [Model:${candidate.modelName}] [LatencyMs:${latencyMs}] [Status:Failed] [Error:${err.message}]`);
+                throw err;
             } finally {
                 clearTimeout(timer!);
             }
@@ -364,6 +459,7 @@ export class ModelRouter {
                         console.warn("[Router] Failed to parse Groq tool call arguments:", tc.function.arguments);
                     }
                     return {
+                        id: tc.id || `call_${Math.random().toString(36).substring(2, 9)}`,
                         name: tc.function.name,
                         args: parsedArgs
                     };
@@ -384,32 +480,42 @@ export class ModelRouter {
      * Core Waterfall Invocation Engine
      * Cycles through WATERFALL_PROVIDERS sequentially if previous providers fail or time out.
      */
-    async invoke(messages: any, logic?: string, options?: { tools?: any[], signal?: AbortSignal }): Promise<any> {
+    async invoke(messages: any, logic?: string, options?: RouterInvokeOptions): Promise<any> {
         const metrics = this.trackRequestMetrics();
 
         // Dynamically build the candidate providers list based on logic mode
-        let providers = [...WATERFALL_PROVIDERS];
+        let rawProviders = [...WATERFALL_PROVIDERS];
 
         if (logic === "graph_extractor") {
             // Prioritize Groq candidate as the primary model for extraction
-            const index = providers.findIndex(p => p.id === "groq-llama-8b" || p.provider === "groq");
+            const index = rawProviders.findIndex(p => p.id === "groq-fast" || p.id === "groq-llama-8b" || p.provider === "groq");
             if (index !== -1) {
-                const [model] = providers.splice(index, 1);
-                providers.unshift(model);
+                const [model] = rawProviders.splice(index, 1);
+                rawProviders.unshift(model);
             }
         } else if (logic === "coding_subagent" || logic === "research_subagent") {
-            // Inject llama-3.3-70b-versatile right after Gemini 2.5 Flash
-            const geminiIndex = providers.findIndex(p => p.id === "gemini-flash-2.5");
-            const groq70b: ProviderCandidate = {
-                id: "groq-llama-3.3-70b",
-                name: "Groq Llama 3.3 70B",
+            const groqLarge: ProviderCandidate = {
+                id: "groq-large",
+                name: "Groq Large",
                 provider: "groq",
-                modelName: "llama-3.3-70b-versatile"
+                modelName: cleanModelName(process.env.GROQ_LARGE_MODEL, "openai/gpt-oss-120b")
             };
+            const geminiIndex = rawProviders.findIndex(p => p.id === "gemini-flash" || p.provider === "gemini");
             if (geminiIndex !== -1) {
-                providers.splice(geminiIndex + 1, 0, groq70b);
+                rawProviders.splice(geminiIndex + 1, 0, groqLarge);
             } else {
-                providers.unshift(groq70b);
+                rawProviders.unshift(groqLarge);
+            }
+        }
+
+        // Deduplicate providers by provider:modelName
+        const providers: ProviderCandidate[] = [];
+        const seen = new Set<string>();
+        for (const cand of rawProviders) {
+            const key = `${cand.provider}:${cand.modelName}`;
+            if (!seen.has(key)) {
+                seen.add(key);
+                providers.push(cand);
             }
         }
 
@@ -428,8 +534,11 @@ export class ModelRouter {
                 continue;
             }
             try {
+                if (options?.reqId) {
+                    console.log(`[DIAG:${options.reqId}] 5. Provider selected: ${candidate.name} (${candidate.modelName})`);
+                }
                 console.log(`[Router] Waterfall -> Invoking Provider [${candidate.name} / ${candidate.modelName}] (RPM: ${metrics.rpm}, RPD: ${metrics.rpd}, Logic: ${logic || "N/A"})...`);
-                const response = await this.invokeProvider(candidate, messages, logic, options);
+                const response = await this.invokeProvider(candidate, messages, { ...options, logic });
                 return response;
             } catch (error: any) {
                 if (options?.signal?.aborted) {
@@ -444,19 +553,23 @@ export class ModelRouter {
                     error?.status === 404 ||
                     error?.statusCode === 404 ||
                     errCode === "model_not_found" ||
+                    errCode === "model_decommissioned" ||
                     msg.includes("404") ||
                     msg.includes("model_not_found") ||
-                    msg.includes("Model not found");
+                    msg.includes("model_decommissioned") ||
+                    msg.includes("Model not found") ||
+                    msg.includes("decommissioned");
 
                 const isQuotaOrExhausted =
                     error?.status === 429 ||
                     msg.includes("429") ||
                     msg.includes("free_tier_requests") ||
                     msg.includes("Quota exceeded") ||
-                    msg.includes("ResourceExhausted");
+                    msg.includes("ResourceExhausted") ||
+                    msg.includes("Too Many Requests");
 
                 if (isNotFound) {
-                    console.warn(`[Router] ⚠️ Model [${candidate.modelName}] not found (404/model_not_found). Cooling down model [${candidate.id}] and failing over.`);
+                    console.warn(`[Router] ⚠️ Model [${candidate.modelName}] unavailable (not found/decommissioned). Cooling down model [${candidate.id}] and failing over.`);
                     this.tripCircuitBreakerForModel(candidate.id);
                 } else if (isQuotaOrExhausted) {
                     this.tripCircuitBreakerForModel(candidate.id);
@@ -468,15 +581,15 @@ export class ModelRouter {
     }
 
     /**
-     * Resilient Waterfall Invocation with Retry & Degradation
+     * Resilient Waterfall Invocation with Fast Fallback & Degradation
      */
-    async invokeWithRetry(messages: any, mode?: string, options?: any, maxRetries = 3) {
+    async invokeWithRetry(messages: any, mode?: string, options?: RouterInvokeOptions, maxRetries = 2) {
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
             if (options?.signal?.aborted) {
                 throw new Error("Request aborted by global timeout");
             }
             if (this.isInFallbackMode()) {
-                console.warn(`[Router] Circuit Breaker Fallback Active (all standard providers down). Returning graceful degradation alert.`);
+                console.warn(`[Router] Circuit Breaker Fallback Active (all standard providers down). Returning graceful degradation alert immediately.`);
                 return {
                     content: "⚠️ [System Alert] All upstream AI providers are currently unreachable. Please check network connectivity or API keys."
                 };
@@ -489,14 +602,14 @@ export class ModelRouter {
                     throw new Error("Request aborted by global timeout");
                 }
 
-                if (attempt >= maxRetries) {
-                    console.error(`[Router] Max retries (${maxRetries}) reached across all providers in waterfall.`);
+                if (attempt >= maxRetries || this.isInFallbackMode()) {
+                    console.error(`[Router] Waterfall exhausted (attempt ${attempt}/${maxRetries}, fallbackMode: ${this.isInFallbackMode()}).`);
                     return {
                         content: "⚠️ [System Alert] All upstream AI providers are currently unreachable. Please check network connectivity or API keys."
                     };
                 }
 
-                const waitMs = 5000 * attempt;
+                const waitMs = 500 * attempt;
                 console.log(`[Router] Retrying waterfall loop in ${waitMs}ms (attempt ${attempt}/${maxRetries})...`);
 
                 // Wait, checking for abort during sleep
@@ -514,6 +627,7 @@ export class ModelRouter {
         }
     }
 
+
     async checkHealth() {
         const hasGemini = !!(
             process.env.GOOGLE_API_KEY ||
@@ -528,7 +642,7 @@ export class ModelRouter {
         return {
             gemini: {
                 status: hasGemini ? "connected" : "error",
-                fallbackMode: this.isModelInCooldown("gemini-flash-2.5"),
+                fallbackMode: this.isModelInCooldown("gemini-flash"),
                 details: hasGemini ? "Google Gemini Bridge Ready." : "GOOGLE_API_KEY missing."
             },
             groq: {
