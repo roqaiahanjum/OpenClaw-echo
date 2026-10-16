@@ -1,0 +1,11 @@
+test_id,name,status,duration_ms,description,details,error_message
+TEST_A,"synthesize_skill path traversal",PASS,2,"Rejection of path traversal '../../escaped' in skill synthesis","Output: Safety Violation: Path traversal detected. Skill path must resolve within the skills sandbox directory. | Outside file exists: false",""
+TEST_B,"duplicate skill synthesis rejection",PASS,24,"Second synthesis of existing skill is rejected and original file unchanged","Second attempt rejected: true, fileUnchanged: true",""
+TEST_C,"SANDBOX_ENV environment isolation",PASS,237,"Ensures API keys are excluded from SANDBOX_ENV and print undefined","Prints undefined: true, Secret not leaked: true",""
+TEST_D,"child_process static check",PASS,12,"Rejection of child_process module in sandbox code","Output: Safety Violation: Code validation rejected unsafe reference: Unauthorized module or operation detect",""
+TEST_E,"output truncation to 50k chars",PASS,245,"Verification of 50,000 character output truncation cap and safety notice","Has notice: true, Output length: 50000",""
+TEST_F,"network primitives rejection (net/http)",PASS,80,"Rejection of net and http network calls in sandbox scripts","net rejected: true, http rejected: true",""
+TEST_G,"atomic file rollback on syntax/module error",PASS,18,"Synthesized file is unlinked if module import fails","Handled module import error: true, File cleaned: true",""
+TEST_H,"fetch API rejection",PASS,12,"Rejection of fetch calls in sandbox scripts","Output: Safety Violation: Code validation rejected unsafe reference: Unauthorized module or operation detect",""
+TEST_I,"node: prefix bypass rejection",PASS,7,"Rejection of node:child_process prefix import","Output: Safety Violation: Code validation rejected unsafe reference: Unauthorized module or operation detect",""
+TEST_J,"dynamic import() rejection",PASS,7,"Rejection of dynamic import() expressions in sandbox code","Output: Safety Violation: Code validation rejected unsafe reference: Unauthorized module or operation detect",""

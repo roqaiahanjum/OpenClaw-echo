@@ -1,0 +1,51 @@
+id,topic,query,expected_fact,vector_hits,vector_raw_p5,vector_dedup_p5,vector_r5,vector_first_rank,vector_rr,fts_hits,fts_raw_p5,fts_dedup_p5,fts_r5,fts_first_rank,fts_rr,sqlite_hits,sqlite_raw_p5,sqlite_dedup_p5,sqlite_r5,sqlite_first_rank,sqlite_rr
+1,"Hardware Setup","What computing board and RAM specification am I using for the gripper?","Compute Module 4",1,0.20,0.20,1.00,2,0.500,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+2,"Database Architecture","Which time-series database and version did we standardize on?","ClickHouse",2,0.40,0.20,1.00,1,1.000,2,0.40,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+3,"User Identity","What is my primary programming language?","Rust",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,2,0.500,0,0.00,0.00,0.00,0,0.000
+4,"Deployment Port","Which port was chosen for the frontend dev server?","4173",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+5,"Security Token","What is our staging environment identifier?","alpha-zenith-99",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+6,"Cloud Region","Which AWS region will host our primary cluster?","eu-central-1",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+7,"Color Palette","What is our primary brand hex color code?","#0F172A",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+8,"LLM Model","Which embedding model was selected for the migration?","gemini-embedding-2",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+9,"Project Deadline","When is the final stakeholder demo scheduled?","November 18th",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+10,"Team Lead","Who is the lead for our QA team?","Sophia Martinez",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+11,"Cache Backend","What cache backend is being tested as a Redis replacement?","DragonflyDB",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+12,"Mobile Framework","Which mobile development framework was chosen?","Flutter",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+13,"Storage Quota","What is the default storage quota allocated per tenant?","250",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+14,"Test Coverage Goal","What is our minimum required code coverage target?","85",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+15,"API Protocol","What protocol will replace REST for internal services?","gRPC",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+16,"Logging Format","What format is required for all application logs?","ndjson",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+17,"VPN Provider","Which secure mesh network provider do we use?","Tailscale",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+18,"License Type","What open source license applies to the core?","Apache 2.0",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+19,"Container Runtime","What container runtime was adopted on Linux workstations?","Podman",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+20,"Encryption Standard","What encryption algorithm is mandated for data at rest?","AES-256-GCM",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+21,"CI System","What CI/CD platform executes our build pipelines?","GitHub Actions",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+22,"Auth Provider","Which provider manages user authentication and passkeys?","Clerk",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+23,"Message Queue","What library handles asynchronous task queues?","BullMQ",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+24,"DNS Provider","Who manages our DNS records?","Cloudflare",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+25,"Telemetry Collector","How are distributed traces collected?","OpenTelemetry",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000
+26,"Search Engine","Which search engine powers the catalog?","Meilisearch",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+27,"CSS Architecture","What styling technology do we use for web applications?","Vanilla CSS",1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000,0,0.00,0.00,0.00,0,0.000
+28,"Package Manager","Which package manager is standardized across our monorepo?","pnpm",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+29,"Web Server","What reverse proxy software handles edge TLS termination?","Caddy",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+30,"Analytics Engine","Which self-hosted analytics tool is in use?","Umami",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,3,0.333,0,0.00,0.00,0.00,0,0.000
+31,"Monitoring Tool","What software stack monitors host system metrics?","Prometheus",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+32,"Font Family","What is the primary UI font family for typography?","Outfit",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+33,"Node Version","What exact version of Node.js is required?","v24.15.0",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,4,0.250,0,0.00,0.00,0.00,0,0.000
+34,"Backup Schedule","What time do daily automated backups execute?","02:30",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+35,"Max Request Size","What is the maximum allowed API request payload size?","15",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+36,"Documentation Generator","What generator produces our technical documentation?","VitePress",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+37,"Code Linter","Which tool performs linting and code formatting?","Biome",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+38,"Payment Gateway","What gateway processes customer payments?","Stripe",1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000,0,0.00,0.00,0.00,0,0.000
+39,"Rate Limit Threshold","What is the rate limit for our public API endpoints?","120",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+40,"Email Transport","Which transactional email service do we use?","Resend",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+41,"Feature Flag System","What software manages feature toggles in production?","Unleash",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+42,"Vector Dimensions","What is the output dimension size of our vector embeddings?","3072",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+43,"Session Secret Expiry","How long before an inactive user session expires?","14 days",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+44,"Error Tracking","What platform tracks frontend runtime exceptions?","Sentry",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+45,"Branch Protection","How many approvals are required to merge into the main branch?","2",2,0.40,0.20,1.00,1,1.000,2,0.40,0.20,1.00,1,1.000,2,0.40,0.20,1.00,1,1.000
+46,"Graph Storage","Which SQLite table stores our knowledge graph relationships?","graph_edges",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+47,"Webhook Secret","What hashing algorithm verifies incoming webhook signatures?","SHA-256",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+48,"Bot Persona","What is the official designation of our autonomous agent persona?","OpenClaw Echo",4,0.80,0.20,1.00,1,1.000,2,0.40,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+49,"Primary Interface","Which bridge acts as the primary chat interface for users?","Telegram",3,0.60,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+50,"Sandbox Directory","In which directory is sandboxed code generated and executed?","src/sandbox",1,0.20,0.20,1.00,1,1.000,2,0.40,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
