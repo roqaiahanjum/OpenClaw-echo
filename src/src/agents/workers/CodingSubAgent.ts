@@ -85,13 +85,69 @@ export class CodingSubAgent implements WorkerAgent {
                 generatedCode = `\`\`\`typescript\n${generatedCode}\n\`\`\``;
             }
 
-            // 3. Real AST Syntax Validation check
-            const syntaxResult = this.validateSyntax(generatedCode, targetFileName);
+            // 3. Validation & Bounded Repair Loop (Max 2 Attempts)
+            let syntaxResult = this.validateSyntax(generatedCode, targetFileName);
+            let safetyResult = validateCodeSafety(sanitizeSandboxCode(generatedCode));
+            let repairAttempts = 0;
+            const MAX_REPAIRS = 2;
+
+            while ((!syntaxResult.valid || !safetyResult.valid) && repairAttempts < MAX_REPAIRS && !router.isInFallbackMode()) {
+                repairAttempts++;
+                console.log(`[CodingSubAgent] Code failed validation. Initiating repair attempt ${repairAttempts}/${MAX_REPAIRS}...`);
+                
+                const errorsList: string[] = [];
+                if (!syntaxResult.valid) errorsList.push(`- TypeScript AST Syntax Error: ${syntaxResult.error}`);
+                if (!safetyResult.valid) errorsList.push(`- Sandbox Safety Violation: ${safetyResult.reason}`);
+
+                const repairPrompt = `You are CodingSubAgent. The TypeScript code you provided failed validation:
+${errorsList.join("\n")}
+
+Original Code:
+${generatedCode}
+
+Task:
+Fix all TypeScript AST syntax errors and safety violations.
+Rules:
+- NEVER import or use 'child_process', 'cluster', 'worker_threads', 'vm', 'net', 'http', or other prohibited system modules.
+- Return ONLY the corrected, clean, compilable TypeScript code inside markdown fences (\`\`\`typescript ... \`\`\`). Do not include conversational explanations.`;
+
+                try {
+                    const timeoutPromise = new Promise((_, reject) =>
+                        setTimeout(() => reject(new Error('REPAIR_TIMEOUT')), 20000)
+                    );
+                    const repairResponse: any = await Promise.race([
+                        router.invoke([
+                            new SystemMessage("You are a specialized TypeScript repair agent. Output only valid, safe TypeScript code."),
+                            new HumanMessage(repairPrompt)
+                        ], "coding_repair"),
+                        timeoutPromise
+                    ]);
+
+                    const repairedCode = (repairResponse.content as string) || "";
+                    if (repairedCode && repairedCode.trim()) {
+                        generatedCode = repairedCode;
+                        if (!generatedCode.includes("```")) {
+                            generatedCode = `\`\`\`typescript\n${generatedCode}\n\`\`\``;
+                        }
+                        syntaxResult = this.validateSyntax(generatedCode, targetFileName);
+                        safetyResult = validateCodeSafety(sanitizeSandboxCode(generatedCode));
+                        console.log(`[CodingSubAgent] Repair attempt ${repairAttempts} result: SyntaxValid=${syntaxResult.valid}, SafetyValid=${safetyResult.valid}`);
+                    }
+                } catch (rErr: any) {
+                    console.warn(`[CodingSubAgent] Repair attempt ${repairAttempts} failed: ${rErr.message}`);
+                    break;
+                }
+            }
+
+            const isCodeValid = syntaxResult.valid && safetyResult.valid;
             const syntaxStatus = syntaxResult.valid 
                 ? "AST Syntax Validation: PASSED (TypeScript parser validated AST) ✅" 
                 : `AST Syntax Validation: FAILED (${syntaxResult.error}) ❌`;
+            const safetyStatus = safetyResult.valid
+                ? "Sandbox Safety Check: PASSED (Zero prohibited modules detected) ✅"
+                : `Sandbox Safety Check: FAILED (${safetyResult.reason}) ❌`;
 
-            // 4. Invoke Registered Tool: write_sandbox_file (if not executeOnly)
+            // 4. Invoke Registered Tool: write_sandbox_file (ONLY if code is valid and not executeOnly)
             const writeTool = SkillRegistry.getToolByName("write_sandbox_file");
             const toolStart = Date.now();
             let toolSuccess = false;
@@ -100,6 +156,9 @@ export class CodingSubAgent implements WorkerAgent {
             if (fileAlreadyExists && task.contextPayload?.executeOnly) {
                 toolSuccess = true;
                 writeToolResult = "Using existing validated file on disk.";
+            } else if (!isCodeValid) {
+                toolSuccess = false;
+                writeToolResult = `Code rejected: ${!syntaxResult.valid ? syntaxResult.error : safetyResult.reason}`;
             } else if (writeTool) {
                 try {
                     writeToolResult = String(await writeTool.invoke({
@@ -121,89 +180,89 @@ export class CodingSubAgent implements WorkerAgent {
             let fileSize = 0;
             let savedFileReport = "";
 
-            try {
-                const stat = await fs.stat(fullFilePath);
-                if (stat.isFile() && stat.size > 0) {
-                    fileVerified = true;
-                    fileSize = stat.size;
-                    savedFileReport = `📁 **Saved File Location**: \`src/sandbox/${targetFileName}\`\n• **Filesystem Status**: VERIFIED ON DISK (via fs.stat) ✅\n• **Verified File Size**: ${stat.size} bytes`;
-                } else {
-                    savedFileReport = `📁 **Saved File Location**: NOT SAVED ❌\n• **Filesystem Status**: FAILED (Target exists but is not a regular file)`;
+            if (toolSuccess) {
+                try {
+                    const stat = await fs.stat(fullFilePath);
+                    if (stat.isFile() && stat.size > 0) {
+                        fileVerified = true;
+                        fileSize = stat.size;
+                        savedFileReport = `📁 **Saved File Location**: \`src/sandbox/${targetFileName}\`\n• **Filesystem Status**: VERIFIED ON DISK (via fs.stat) ✅\n• **Verified File Size**: ${stat.size} bytes`;
+                    } else {
+                        savedFileReport = `📁 **Saved File Location**: NOT SAVED ❌\n• **Filesystem Status**: FAILED (Target exists but is not a regular file)`;
+                    }
+                } catch (vErr: any) {
+                    fileVerified = false;
+                    savedFileReport = `📁 **Saved File Location**: NOT SAVED ❌\n• **Filesystem Status**: FAILED (${vErr.message})`;
                 }
-            } catch (vErr: any) {
-                fileVerified = false;
-                savedFileReport = `📁 **Saved File Location**: NOT SAVED ❌\n• **Filesystem Status**: FAILED (${vErr.message})`;
+            } else {
+                savedFileReport = `📁 **Saved File Location**: NOT SAVED ❌\n• **Filesystem Status**: REJECTED (${writeToolResult})`;
             }
 
             const toolDuration = Date.now() - toolStart;
             console.log(`[StructuredLog] [TaskId:${task.taskId}] [Agent:CodingSubAgent] [Tool:write_sandbox_file] [Status:${(toolSuccess && fileVerified) ? 'SUCCESS' : 'FAILED'}] [DurationMs:${toolDuration}] [Result:Saved src/sandbox/${targetFileName} (${fileSize} bytes)]`);
 
-            // 6. Execution via Registered Tool: run_sandbox_code
+            // 6. Execution Pre-flight Check & Execution via Registered Tool
             const lowerDesc = task.taskDescription.toLowerCase();
             const shouldExecute = 
                 Boolean(task.contextPayload?.execute) ||
                 Boolean(task.contextPayload?.executeOnly) ||
-                lowerDesc.includes("execute") ||
-                lowerDesc.includes("execution") ||
                 lowerDesc.includes("run the code") ||
-                lowerDesc.includes("run this") ||
-                lowerDesc.includes("and run") ||
-                lowerDesc.includes("authorize");
-            let executionReport = "⚙️ **Execution Status**: NOT EXECUTED (Code was generated and verified in sandbox; execution was not requested).";
+                lowerDesc.includes("execute the code") ||
+                lowerDesc.includes("execute the script") ||
+                lowerDesc.includes("run this script now") ||
+                lowerDesc.startsWith("run ") ||
+                lowerDesc.startsWith("execute ");
 
-            if (shouldExecute && fileVerified) {
-                const runTool = SkillRegistry.getToolByName("run_sandbox_code");
-                if (runTool) {
-                    try {
-                        const runOutput = String(await runTool.invoke({ fileName: targetFileName }));
-                        const isSuccess = !runOutput.includes("Execution failed") && 
-                                          !runOutput.includes("Safety Error") && 
-                                          !runOutput.includes("Safety Violation");
-                        executionReport = `⚙️ **Status**: ${isSuccess ? 'EXECUTED ✅' : 'EXECUTION FAILED ❌'}\n\`\`\`\n${runOutput.trim()}\n\`\`\``;
-                    } catch (toolExecErr: any) {
-                        executionReport = `⚙️ **Status**: EXECUTION FAILED ❌ (${toolExecErr.message})`;
-                    }
+            let executionReport = "⚙️ **Execution Status**: NOT EXECUTED (Code was generated and verified; execution was not explicitly requested).";
+            let executionSuccess = false;
+
+            if (shouldExecute) {
+                if (!fileVerified || !isCodeValid) {
+                    executionReport = "⚙️ **Execution Status**: NOT EXECUTED (Prerequisite file creation or syntax validation failed).";
                 } else {
-                    try {
-                        const { exec } = await import("child_process");
-                        const { promisify } = await import("util");
-                        const execAsync = promisify(exec);
-                        
-                        // Patch 3: validateCodeSafety before fallback execution
-                        const fallbackCode = await fs.readFile(fullFilePath, "utf-8").catch(() => "");
-                        const safetyCheck = validateCodeSafety(fallbackCode);
-                        if (!safetyCheck.valid) {
-                            executionReport = `⚙️ **Status**: EXECUTION FAILED ❌ (Safety Violation: ${safetyCheck.reason})`;
-                        } else {
-                            const runCmd = targetFileName.endsWith(".ts") 
-                                ? `npx ts-node "${fullFilePath}"` 
-                                : `node "${fullFilePath}"`;
-
-                            // Patch 2: Shared SANDBOX_ENV and 256KB maxBuffer
-                            const { stdout, stderr } = await execAsync(runCmd, {
-                                timeout: 8000,
-                                maxBuffer: 256 * 1024,
-                                env: SANDBOX_ENV
-                            });
-                            // Patch 2: Truncate output at 50,000 chars with notice
-                            const rawOut = stdout || stderr || "Execution finished with no output";
-                            const truncatedOut = truncateSandboxOutput(rawOut);
-                            executionReport = `⚙️ **Status**: EXECUTED ✅\n\`\`\`\n${truncatedOut}\n\`\`\``;
+                    // Check tooling availability
+                    const isTs = targetFileName.endsWith(".ts");
+                    let toolingAvailable = true;
+                    if (isTs) {
+                        try {
+                            const { exec } = await import("child_process");
+                            const { promisify } = await import("util");
+                            await promisify(exec)("npx ts-node --version", { timeout: 4000 });
+                        } catch {
+                            toolingAvailable = false;
                         }
-                    } catch (execErr: any) {
-                        const errorMsg = execErr.stdout ? truncateSandboxOutput(execErr.stdout) : execErr.message;
-                        executionReport = `⚙️ **Status**: EXECUTION FAILED ❌ (${errorMsg})`;
+                    }
+
+                    if (!toolingAvailable) {
+                        executionReport = "⚙️ **Execution Status**: TOOLING_UNAVAILABLE (TypeScript runner 'ts-node' is not available in the environment to execute this file).";
+                    } else {
+                        const runTool = SkillRegistry.getToolByName("run_sandbox_code");
+                        if (runTool) {
+                            try {
+                                const runOutput = String(await runTool.invoke({ fileName: targetFileName }));
+                                executionSuccess = !runOutput.includes("Execution failed") && 
+                                                   !runOutput.includes("Safety Error") && 
+                                                   !runOutput.includes("Safety Violation");
+                                executionReport = `⚙️ **Execution Status**: ${executionSuccess ? 'EXECUTED ✅' : 'EXECUTION FAILED ❌'}\n\`\`\`\n${runOutput.trim()}\n\`\`\``;
+                            } catch (toolExecErr: any) {
+                                executionReport = `⚙️ **Execution Status**: EXECUTION FAILED ❌ (${toolExecErr.message})`;
+                            }
+                        } else {
+                            executionReport = "⚙️ **Execution Status**: TOOLING_UNAVAILABLE (run_sandbox_code tool not registered).";
+                        }
                     }
                 }
             }
 
             const executionTimeMs = Date.now() - startTime;
-            const overallSuccess = toolSuccess && fileVerified;
+            // Strict overallSuccess: Must have valid code, successful write, verified disk file, and if execution was requested, execution must succeed.
+            const overallSuccess = isCodeValid && toolSuccess && fileVerified && (!shouldExecute || executionSuccess);
 
             const resultData = [
                 `### 1. Generated Code`,
                 generatedCode,
                 `*${syntaxStatus}*`,
+                `*${safetyStatus}*`,
                 ``,
                 `### 2. Saved File Status`,
                 savedFileReport,
@@ -216,8 +275,8 @@ export class CodingSubAgent implements WorkerAgent {
                 taskId: task.taskId,
                 targetAgent: this.agentType,
                 status: overallSuccess ? "SUCCESS" : "FAILED",
-                resultData: overallSuccess ? resultData : `⚠️ [CodingSubAgent Partial]: ${savedFileReport}\n\n${resultData}`,
-                error: overallSuccess ? undefined : writeToolResult,
+                resultData: overallSuccess ? resultData : `⚠️ [CodingSubAgent Failure]: ${!isCodeValid ? (!syntaxResult.valid ? syntaxResult.error : safetyResult.reason) : (shouldExecute && !executionSuccess ? 'Execution failed' : 'File write failed')}\n\n${resultData}`,
+                error: overallSuccess ? undefined : (syntaxResult.error || safetyResult.reason || writeToolResult),
                 executionTimeMs
             };
 

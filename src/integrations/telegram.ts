@@ -350,6 +350,20 @@ export const executeAutonomousFlow = async (input: string, chatId?: string | num
             const acpTasks = decomposeIntoACPTasks(input, plan ? JSON.stringify(plan) : undefined);
             const workerResults = await SubAgentManager.getInstance().delegateTasksWithDependencies(acpTasks);
 
+            const totalStages = workerResults.length;
+            const successfulStages = workerResults.filter(r => r.status === 'SUCCESS').length;
+            const isFullSuccess = successfulStages === totalStages;
+            const isPartialSuccess = successfulStages > 0 && !isFullSuccess;
+
+            let statusBadge = "";
+            if (isFullSuccess) {
+                statusBadge = `✅ **STATUS: SUCCESS (${successfulStages}/${totalStages} Stages Passed)**`;
+            } else if (isPartialSuccess) {
+                statusBadge = `⚠️ **STATUS: PARTIAL_SUCCESS (${successfulStages}/${totalStages} Stages Passed)**`;
+            } else {
+                statusBadge = `❌ **STATUS: FAILED (0/${totalStages} Stages Passed)**`;
+            }
+
             const reportSections = workerResults.map(res => {
                 const agentName = (res.targetAgent || 'worker').toLowerCase();
                 let sectionBanner = "";
@@ -366,10 +380,10 @@ export const executeAutonomousFlow = async (input: string, chatId?: string | num
                 if (res.status === 'SUCCESS') {
                     return `${sectionBanner}${res.resultData}`;
                 }
-                return `${sectionBanner}⚠️ [${agentName.toUpperCase()} Task Incomplete/Failed]: ${res.error || 'Execution did not complete successfully'}`;
+                return `${sectionBanner}⚠️ [${agentName.toUpperCase()} Task Incomplete/Failed]: ${res.error || 'Execution did not complete successfully'}\n\n${res.resultData || ''}`.trim();
             });
 
-            const header = `📋 **OpenClaw Echo Multi-Agent Execution Report**\n\n`;
+            const header = `📋 **OpenClaw Echo Multi-Agent Execution Report**\n${statusBadge}\n\n`;
             const finalResponse = header + reportSections.join('\n\n═══════════════════════════════════════\n\n');
             if (parentSignal?.aborted) throw new Error("FLOW_ABORTED");
             await safeReply(finalResponse);
