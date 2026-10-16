@@ -1,5 +1,5 @@
 id,topic,query,expected_fact,vector_hits,vector_raw_p5,vector_dedup_p5,vector_r5,vector_first_rank,vector_rr,fts_hits,fts_raw_p5,fts_dedup_p5,fts_r5,fts_first_rank,fts_rr,sqlite_hits,sqlite_raw_p5,sqlite_dedup_p5,sqlite_r5,sqlite_first_rank,sqlite_rr
-1,"Hardware Setup","What computing board and RAM specification am I using for the gripper?","Compute Module 4",1,0.20,0.20,1.00,2,0.500,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+1,"Hardware Setup","What computing board and RAM specification am I using for the gripper?","Compute Module 4",1,0.20,0.20,1.00,2,0.500,1,0.20,0.20,1.00,2,0.500,0,0.00,0.00,0.00,0,0.000
 2,"Database Architecture","Which time-series database and version did we standardize on?","ClickHouse",2,0.40,0.20,1.00,1,1.000,2,0.40,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
 3,"User Identity","What is my primary programming language?","Rust",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,2,0.500,0,0.00,0.00,0.00,0,0.000
 4,"Deployment Port","Which port was chosen for the frontend dev server?","4173",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
@@ -46,6 +46,6 @@ id,topic,query,expected_fact,vector_hits,vector_raw_p5,vector_dedup_p5,vector_r5
 45,"Branch Protection","How many approvals are required to merge into the main branch?","2",2,0.40,0.20,1.00,1,1.000,2,0.40,0.20,1.00,1,1.000,2,0.40,0.20,1.00,1,1.000
 46,"Graph Storage","Which SQLite table stores our knowledge graph relationships?","graph_edges",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
 47,"Webhook Secret","What hashing algorithm verifies incoming webhook signatures?","SHA-256",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
-48,"Bot Persona","What is the official designation of our autonomous agent persona?","OpenClaw Echo",4,0.80,0.20,1.00,1,1.000,2,0.40,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
-49,"Primary Interface","Which bridge acts as the primary chat interface for users?","Telegram",3,0.60,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+48,"Bot Persona","What is the official designation of our autonomous agent persona?","OpenClaw Echo",1,0.20,0.20,1.00,1,1.000,2,0.40,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
+49,"Primary Interface","Which bridge acts as the primary chat interface for users?","Telegram",1,0.20,0.20,1.00,1,1.000,1,0.20,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000
 50,"Sandbox Directory","In which directory is sandboxed code generated and executed?","src/sandbox",1,0.20,0.20,1.00,1,1.000,2,0.40,0.20,1.00,1,1.000,0,0.00,0.00,0.00,0,0.000

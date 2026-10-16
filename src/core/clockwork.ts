@@ -130,4 +130,13 @@ export class Clockwork {
             console.log(`[Clockwork] Booted ${enabled.length} scheduled task(s).`);
         }
     }
+
+    /** Stop all active timers cleanly */
+    static stop() {
+        for (const [_, timer] of this.timers.entries()) {
+            clearInterval(timer);
+        }
+        this.timers.clear();
+        console.log("[Clockwork] All timers stopped.");
+    }
 }

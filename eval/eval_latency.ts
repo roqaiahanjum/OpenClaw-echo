@@ -168,21 +168,19 @@ export async function evaluateLatency(): Promise<LatencyEvaluationSummary> {
             }
         };
 
-        (SkillRegistry as any).getToolByName = (name: string) => {
-            const tool = origGetToolByName(name);
-            if (!tool) return tool;
-            return {
-                ...tool,
-                invoke: async (...args: any[]) => {
-                    const t0 = Date.now();
-                    try {
-                        return await tool.invoke(...args);
-                    } finally {
-                        toolMs += (Date.now() - t0);
-                    }
+        const originalToolInvokes = new Map<string, any>();
+        for (const tool of SkillRegistry.getTools()) {
+            const orig = tool.invoke.bind(tool);
+            originalToolInvokes.set(tool.name, orig);
+            tool.invoke = async (...args: any[]) => {
+                const t0 = Date.now();
+                try {
+                    return await orig(...args);
+                } finally {
+                    toolMs += (Date.now() - t0);
                 }
             };
-        };
+        }
 
         (localVerifierModule as any).localVerifyToolResult = (...args: any[]) => {
             const t0 = Date.now();
@@ -222,6 +220,11 @@ export async function evaluateLatency(): Promise<LatencyEvaluationSummary> {
             await executeAutonomousFlow(prompt, `eval_latency_${runId}`, false, replyFn);
         } catch (err: any) {
             responseText = `EXCEPTION: ${err.message}`;
+        } finally {
+            for (const tool of SkillRegistry.getTools()) {
+                const orig = originalToolInvokes.get(tool.name);
+                if (orig) tool.invoke = orig;
+            }
         }
         const totalDurationMs = Date.now() - tStart;
 
@@ -283,7 +286,6 @@ export async function evaluateLatency(): Promise<LatencyEvaluationSummary> {
         // Restore all originals
         (memory as any).getContext = origGetContext;
         (plannerModule as any).generateSmartPlan = origGenerateSmartPlan;
-        (SkillRegistry as any).getToolByName = origGetToolByName;
         (localVerifierModule as any).localVerifyToolResult = origLocalVerify;
         (verifierModule as any).verifyStepResult = origVerifyStepResult;
         router.invoke = origInvoke;

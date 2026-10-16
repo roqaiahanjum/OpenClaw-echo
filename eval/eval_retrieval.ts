@@ -1,5 +1,9 @@
 import * as fs from "fs/promises";
 import * as path from "path";
+import * as dotenv from "dotenv";
+
+dotenv.config({ path: path.resolve(process.cwd(), ".env") });
+
 import { MemoryManager } from "../src/memory/manager";
 
 export interface RetrievalTestItem {
@@ -537,9 +541,31 @@ export async function evaluateRetrieval(): Promise<RetrievalEvaluationResult> {
         });
     });
 
+    const hasEvalVectors = vectorStore && (vectorStore as any).memoryVectors?.some(
+        (v: any) => v.metadata?.chatId?.startsWith("eval_chat_") && v.embedding?.length === 3072
+    );
+
+    const docsToAdd: any[] = [];
+    for (const item of CONVERSATIONS) {
+        for (const turn of item.turns) {
+            const id = `eval_msg_${item.id}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+            const chatId = `eval_chat_${item.id}`;
+            docsToAdd.push({
+                pageContent: `User: ${turn.user}\nAgent: ${turn.agent}`,
+                metadata: {
+                    id,
+                    chatId,
+                    userInput: turn.user,
+                    agentResponse: turn.agent,
+                    type: "CONVERSATION",
+                    timestamp: new Date().toISOString()
+                }
+            });
+        }
+    }
+
     if (seededCount < 50) {
-        console.log(`[RetrievalEval] Seeding test conversations (currently ${seededCount} in DB)...`);
-        const docsToAdd: any[] = [];
+        console.log(`[RetrievalEval] Seeding test conversations into SQLite (currently ${seededCount} in DB)...`);
         for (const item of CONVERSATIONS) {
             for (const turn of item.turns) {
                 const id = `eval_msg_${item.id}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
@@ -551,30 +577,26 @@ export async function evaluateRetrieval(): Promise<RetrievalEvaluationResult> {
                         (err: any) => err ? rej(err) : res()
                     );
                 });
-                docsToAdd.push({
-                    pageContent: `User: ${turn.user}\nAgent: ${turn.agent}`,
-                    metadata: {
-                        id,
-                        chatId,
-                        userInput: turn.user,
-                        agentResponse: turn.agent,
-                        type: "CONVERSATION",
-                        timestamp: new Date().toISOString()
-                    }
-                });
             }
-        }
-        if (vectorStore && docsToAdd.length > 0) {
-            console.log(`[RetrievalEval] Adding ${docsToAdd.length} documents to vector store in batches...`);
-            const BATCH_SIZE = 25;
-            for (let i = 0; i < docsToAdd.length; i += BATCH_SIZE) {
-                const batch = docsToAdd.slice(i, i + BATCH_SIZE);
-                await vectorStore.addDocuments(batch);
-            }
-            await (memory as any).saveVectorStore();
         }
     } else {
-        console.log(`[RetrievalEval] Conversations already seeded (${seededCount} interactions present).`);
+        console.log(`[RetrievalEval] Conversations already seeded in SQLite (${seededCount} interactions present).`);
+    }
+
+    if (vectorStore && !hasEvalVectors) {
+        console.log(`[RetrievalEval] Embedding ${docsToAdd.length} evaluation documents into vector store...`);
+        const embeddingsGen = (memory as any).embeddings;
+        const BATCH_SIZE = 25;
+        for (let i = 0; i < docsToAdd.length; i += BATCH_SIZE) {
+            const batch = docsToAdd.slice(i, i + BATCH_SIZE);
+            const texts = batch.map(d => d.pageContent);
+            const vectors = await embeddingsGen.embedDocuments(texts);
+            await vectorStore.addVectors(vectors, batch);
+            console.log(`[RetrievalEval] Embedded batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(docsToAdd.length / BATCH_SIZE)} (${batch.length} docs).`);
+        }
+        await (memory as any).saveVectorStore();
+    } else if (vectorStore) {
+        console.log(`[RetrievalEval] Vector store already contains valid evaluation vectors.`);
     }
 
     // 2. Setup / synchronize SQLite FTS5 virtual table
