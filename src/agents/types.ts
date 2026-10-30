@@ -1,6 +1,12 @@
 // @ts-nocheck
 
-export type TargetAgentType = 'research' | 'coding' | 'browser';
+export type TargetAgentType = 
+    | 'conversation'
+    | 'research' 
+    | 'coding' 
+    | 'memory'
+    | 'browser'
+    | 'planner';
 
 export interface ACPTask {
     taskId: string;
@@ -17,6 +23,10 @@ export interface ACPResult {
     targetAgent: TargetAgentType;
     status: 'SUCCESS' | 'FAILED' | 'DELEGATED';
     resultData: string;
+    toolName?: string;
+    toolOutput?: any;
+    verified?: boolean;
+    verificationReason?: string;
     error?: string;
     executionTimeMs: number;
 }
@@ -25,4 +35,3 @@ export interface WorkerAgent {
     readonly agentType: TargetAgentType;
     execute(task: ACPTask): Promise<ACPResult>;
 }
-

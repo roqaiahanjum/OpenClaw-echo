@@ -1382,3 +1382,39 @@ export const manageGitRepositoryTool = tool(
         })
     }
 );
+
+
+/**
+ * Conversation Context Tool
+ * Retrieves local conversation persona, project identity, active tools, system status,
+ * and relevant conversational facts without calling expensive external APIs or web search.
+ */
+export const conversationContextTool = tool(
+    async ({ query, topic }: { query?: string; topic?: string }) => {
+        const now = new Date();
+        const persona = "Autonomous Multi-Agent AI Framework (OpenClaw Echo)";
+        let matchedFacts: any[] = [];
+        try {
+            const { MemoryManager } = await import("../memory/manager");
+            const memoryInstance = MemoryManager.getInstance();
+            matchedFacts = await memoryInstance.getAllFacts();
+        } catch (_) {}
+
+        return JSON.stringify({
+            status: "SUCCESS",
+            timestamp: now.toISOString(),
+            system: persona,
+            matchedFactsCount: matchedFacts.length,
+            sampleFacts: matchedFacts.slice(0, 3).map(f => `${f.key}: ${f.value}`),
+            note: "Local conversation context retrieved successfully. Use to formulate helpful, polite, and grounded conversational responses."
+        });
+    },
+    {
+        name: "get_conversation_context",
+        description: "Retrieves local conversation persona, system time, active tools, and local memory facts for grounded conversational responses.",
+        schema: z.object({
+            query: z.string().optional().describe("User conversational greeting or query"),
+            topic: z.string().optional().describe("Optional conversation topic focus")
+        })
+    }
+);

@@ -21,7 +21,8 @@ import {
     getAllKnowledgeTool,
     getMemoryStatsTool,
     ingestToLongTermMemoryTool,
-    searchMemoryTool
+    searchMemoryTool,
+    conversationContextTool
 } from "./tools";
 
 /**
@@ -52,7 +53,8 @@ export class SkillRegistry {
         getAllKnowledgeTool,
         getMemoryStatsTool,
         ingestToLongTermMemoryTool,
-        searchMemoryTool
+        searchMemoryTool,
+        conversationContextTool
     ];
 
     private static cachedTools: any[] | null = null;
@@ -98,8 +100,8 @@ export class SkillRegistry {
     static getToolByName(name: string) {
         const tools = this.getTools();
         if (name === "send_email") {
-            return tools.find(tool => tool.name === "send_email_report" || tool.name === "send_email");
+            return tools.find((t: any) => t.name === "send_email_report");
         }
-        return tools.find(tool => tool.name === name);
+        return tools.find((t: any) => t.name === name);
     }
 }

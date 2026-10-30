@@ -1,7 +1,10 @@
 node_modules/
 .env
+.env.*
+!.env.example
 dist/
 build/
+dashboard/dist/
 *.sqlite
 *.sqlite-journal
 *.db
@@ -10,6 +13,7 @@ npm-debug.log*
 *.log
 logs/
 .tsbuildinfo
+*.zip
 
 # Generated sandbox files & outputs
 src/sandbox/

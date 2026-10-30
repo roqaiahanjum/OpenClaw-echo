@@ -21,6 +21,8 @@ import { determineRecoveryStrategy } from "../core/recovery";
 import { localVerifyToolResult } from "../core/localVerifier";
 import { isSimpleConversation } from "../core/conversationGuard";
 import { ToolSelector } from "../core/toolSelector";
+import { AuthManager } from "../core/auth";
+import { classifyUserIntent } from "../core/intentClassifier";
 
 import { telemetry } from "./telemetry";
 
@@ -34,6 +36,7 @@ bot.catch((err: any, ctx: Context) => {
 
 const router = ModelRouter.getInstance();
 const memory = MemoryManager.getInstance();
+const authManager = AuthManager.getInstance();
 const app = express();
 app.use(express.json());
 app.use(express.static(path.resolve("public")));
@@ -250,73 +253,48 @@ export const executeAutonomousFlow = async (input: string, chatId?: string | num
             throw new Error("FLOW_ABORTED");
         }
 
-        const simpleGreetings = ['hi', 'hello', 'hey', 'thanks', 'ok', 'okay', 'bye', 'good morning', 'good night'];
-        const isSimpleMessage = simpleGreetings.some(g => input.toLowerCase().trim() === g);
+        // ◄── STEP 3: INTENT CLASSIFICATION & MANDATORY AGENT ROUTING ──►
+        const intentDecision = classifyUserIntent(input);
+        DashboardLogger.log(`[IntentRouter] Intent: ${intentDecision.intent} -> Primary Agent: ${intentDecision.primaryAgent} (Confidence: ${Math.round(intentDecision.confidence * 100)}%)`);
+        if (requestId) {
+            console.log(`[StructuredLog] [RequestId:${requestId}] [Event:IntentClassified] [Intent:${intentDecision.intent}] [PrimaryAgent:${intentDecision.primaryAgent}] [Confidence:${intentDecision.confidence}]`);
+        }
 
-        if ((isSimpleMessage || isSimpleConversation(input)) && !isPhoto) {
-            DashboardLogger.log(`[FastPath] FAST PATH DETECTED — Skipping tool loading (1 Gemini Call).`);
-            const systemPromptText = `You are OpenClaw Echo, a helpful AI assistant. Be brief, polite, and direct (max 2-3 sentences).\nContext: ${context}`;
-            const simpleMessages = [
-                new SystemMessage(systemPromptText),
-                new HumanMessage(input)
-            ];
+        // 1. MULTI-AGENT / PLANNER PIPELINE
+        if (!isPhoto && (intentDecision.intent === "MULTI_AGENT" || intentDecision.primaryAgent === "planner")) {
+            if (progressFn) await progressFn("🤖 _Planning & orchestrating multi-agent execution with dependency resolution..._").catch(() => {});
+            const plannerTask: ACPTask = {
+                taskId: `planner_${requestId || Date.now()}`,
+                parentId: `root_${Date.now()}`,
+                targetAgent: "planner",
+                taskDescription: input,
+                contextPayload: { originalPrompt: input },
+                maxDepth: 3,
+                dependsOn: []
+            };
 
-            const response: any = await invokeWithTimeout(simpleMessages, "simple", {}, parentSignal, requestId);
-            const replyText = (response.content as string) || "Hello! How can I help you today?";
+            const plannerResult = await SubAgentManager.getInstance().delegateTask(plannerTask);
+            const finalResponse = plannerResult.resultData || `⚠️ [PlannerSubAgent Failed]: ${plannerResult.error || "Execution incomplete"}`;
 
             if (parentSignal?.aborted) throw new Error("FLOW_ABORTED");
-            await safeReply(replyText);
-            if (!parentSignal?.aborted) {
-                memory.addInteraction(input, replyText, chatId?.toString() || 'default')
-                    .catch(err => console.warn("[Memory] Background interaction persistence warning:", err.message));
-            }
+            await safeReply(finalResponse);
+            memory.addInteraction(input, finalResponse, chatId?.toString() || "default")
+                .catch(err => console.warn("[Memory] Background interaction persistence warning:", err.message));
             Telemetry.broadcast("status_update", { event: "flow_complete" });
             return;
         }
 
-        // ◄── SUB-AGENT DELEGATION (Phase 7 & 8: Multi-Agent & File Operations) ──►
-        // Evaluated BEFORE single-tool search bypass to avoid hijacking multi-step requests
-        const lowerInputStr = input.toLowerCase();
-        const isCodingFileTask = (
-            (lowerInputStr.includes("create") || lowerInputStr.includes("write") || lowerInputStr.includes("generate") || lowerInputStr.includes("make") || lowerInputStr.includes("save")) &&
-            (lowerInputStr.includes("file") || lowerInputStr.includes(".ts") || lowerInputStr.includes(".js") || lowerInputStr.includes("script") || lowerInputStr.includes("sandbox") || lowerInputStr.includes("code"))
-        );
-        const isMultiAgentTask = (
-            (lowerInputStr.includes("research") && (lowerInputStr.includes("code") || lowerInputStr.includes("script") || lowerInputStr.includes("write") || lowerInputStr.includes("browse") || lowerInputStr.includes("example") || lowerInputStr.includes("report") || lowerInputStr.includes("save"))) ||
-            (lowerInputStr.includes("browse") && (lowerInputStr.includes("code") || lowerInputStr.includes("example") || lowerInputStr.includes("save") || lowerInputStr.includes("generate") || lowerInputStr.includes("report"))) ||
-            lowerInputStr.includes("multi-step") ||
-            lowerInputStr.includes("multi-agent") ||
-            lowerInputStr.includes("combined report") ||
-            lowerInputStr.includes("delegate") ||
-            isCodingFileTask
-        );
-
-        const isSingleCodingTask = isCodingFileTask &&
-            !lowerInputStr.includes("research") &&
-            !lowerInputStr.includes("browse") &&
-            !lowerInputStr.includes("documentation") &&
-            !lowerInputStr.includes("docs") &&
-            !lowerInputStr.includes("multi-step") &&
-            !lowerInputStr.includes("compare") &&
-            !lowerInputStr.includes("http") &&
-            !lowerInputStr.includes("report");
-
-        // ◄── SINGLE FILE-CREATION / CODING DIRECT DELEGATION ──►
-        if (isSingleCodingTask && !isPhoto) {
-            DashboardLogger.log(`[OmniSubAgent] SINGLE CODING FILE CREATION DETECTED — Delegating directly to CodingSubAgent without multi-agent wave overhead.`);
-            if (progressFn) await progressFn(`🤖 _Generating code and saving file to sandbox..._`).catch(() => {});
-            if (requestId) {
-                console.log(`[StructuredLog] [RequestId:${requestId}] [Event:SingleCodingDelegation] [Action:DirectCodingSubAgent]`);
-            }
-
+        // 2. CODING PIPELINE (CodingSubAgent with mandatory sandbox write + execution)
+        if (!isPhoto && intentDecision.primaryAgent === "coding") {
+            if (progressFn) await progressFn("💻 _Generating code and executing in sandbox verification engine..._").catch(() => {});
             const fileMatch = input.match(/(?:named|called|file|into|save|create)\s+([a-zA-Z0-9_\-]+\.(?:ts|js|json|txt|py))/i) ||
                               input.match(/([a-zA-Z0-9_\-]+\.(?:ts|js|json|txt|py))/i);
             const fileName = fileMatch ? fileMatch[1] : undefined;
 
             const codingTask: ACPTask = {
                 taskId: `task_code_${Date.now()}`,
-                parentId: `single_coding_${Date.now()}`,
-                targetAgent: 'coding',
+                parentId: `root_${Date.now()}`,
+                targetAgent: "coding",
                 taskDescription: input,
                 contextPayload: { originalPrompt: input, fileName },
                 maxDepth: 1,
@@ -324,128 +302,123 @@ export const executeAutonomousFlow = async (input: string, chatId?: string | num
             };
 
             const result = await SubAgentManager.getInstance().delegateTask(codingTask);
-            const finalResponse = result.status === 'SUCCESS'
+            const finalResponse = result.status === "SUCCESS"
                 ? result.resultData
-                : `⚠️ [CodingSubAgent Incomplete/Failed]: ${result.error || 'Execution did not complete successfully'}`;
+                : `⚠️ [CodingSubAgent Incomplete/Failed]: ${result.error || "Execution did not complete successfully"}`;
 
             if (parentSignal?.aborted) throw new Error("FLOW_ABORTED");
             await safeReply(finalResponse);
-            memory.addInteraction(input, finalResponse, chatId?.toString() || 'default')
+            memory.addInteraction(input, finalResponse, chatId?.toString() || "default")
                 .catch(err => console.warn("[Memory] Background interaction persistence warning:", err.message));
             Telemetry.broadcast("status_update", { event: "flow_complete" });
             return;
         }
 
-        // ◄── MULTI-AGENT DELEGATION (Multi-Step / Research + Browse + Coding) ──►
-        if (isMultiAgentTask && !isPhoto) {
-            DashboardLogger.log(`[OmniSubAgent] MULTI-AGENT / CODING DELEGATION DETECTED — Dispatching via SubAgentManager & ACP Protocol.`);
-            if (progressFn) await progressFn(`🤖 _Dispatching specialized Multi-Agent SubAgents with dependency resolution..._`).catch(() => {});
-            if (requestId) {
-                console.log(`[StructuredLog] [RequestId:${requestId}] [Event:SubAgentDelegation] [Type:MultiAgent]`);
-            }
-            const tools = SkillRegistry.getTools();
-            const toolNames = tools.map((t: any) => t.name);
-            const plan = await generateSmartPlan(input, toolNames, parentSignal);
+        // 3. RESEARCH PIPELINE (ResearchSubAgent with mandatory web_search + knowledge graph)
+        if (!isPhoto && intentDecision.primaryAgent === "research") {
+            if (progressFn) await progressFn("🔬 _Researching live intelligence and traversing knowledge graph..._").catch(() => {});
+            const researchTask: ACPTask = {
+                taskId: `task_res_${Date.now()}`,
+                parentId: `root_${Date.now()}`,
+                targetAgent: "research",
+                taskDescription: input,
+                contextPayload: { originalPrompt: input },
+                maxDepth: 1,
+                dependsOn: []
+            };
 
-            const acpTasks = decomposeIntoACPTasks(input, plan ? JSON.stringify(plan) : undefined);
-            const workerResults = await SubAgentManager.getInstance().delegateTasksWithDependencies(acpTasks);
+            const result = await SubAgentManager.getInstance().delegateTask(researchTask);
+            const finalResponse = result.status === "SUCCESS"
+                ? result.resultData
+                : `⚠️ [ResearchSubAgent Incomplete/Failed]: ${result.error || "Research could not be completed"}`;
 
-            const totalStages = workerResults.length;
-            const successfulStages = workerResults.filter(r => r.status === 'SUCCESS').length;
-            const isFullSuccess = successfulStages === totalStages;
-            const isPartialSuccess = successfulStages > 0 && !isFullSuccess;
-
-            let statusBadge = "";
-            if (isFullSuccess) {
-                statusBadge = `✅ **STATUS: SUCCESS (${successfulStages}/${totalStages} Stages Passed)**`;
-            } else if (isPartialSuccess) {
-                statusBadge = `⚠️ **STATUS: PARTIAL_SUCCESS (${successfulStages}/${totalStages} Stages Passed)**`;
-            } else {
-                statusBadge = `❌ **STATUS: FAILED (0/${totalStages} Stages Passed)**`;
-            }
-
-            const reportSections = workerResults.map(res => {
-                const agentName = (res.targetAgent || 'worker').toLowerCase();
-                let sectionBanner = "";
-                if (agentName === "research") {
-                    sectionBanner = "🔬 **STAGE 1: RESEARCH & LIVE INTELLIGENCE**\n";
-                } else if (agentName === "browser") {
-                    sectionBanner = "🌐 **STAGE 2: DOCUMENTATION & LIVE BROWSING**\n";
-                } else if (agentName === "coding") {
-                    sectionBanner = "💻 **STAGE 3: CODE GENERATION & SANDBOX VERIFICATION**\n";
-                } else {
-                    sectionBanner = `⚙️ **WORKER: ${agentName.toUpperCase()}**\n`;
-                }
-
-                if (res.status === 'SUCCESS') {
-                    return `${sectionBanner}${res.resultData}`;
-                }
-                return `${sectionBanner}⚠️ [${agentName.toUpperCase()} Task Incomplete/Failed]: ${res.error || 'Execution did not complete successfully'}\n\n${res.resultData || ''}`.trim();
-            });
-
-            const header = `📋 **OpenClaw Echo Multi-Agent Execution Report**\n${statusBadge}\n\n`;
-            const finalResponse = header + reportSections.join('\n\n═══════════════════════════════════════\n\n');
             if (parentSignal?.aborted) throw new Error("FLOW_ABORTED");
             await safeReply(finalResponse);
-            memory.addInteraction(input, finalResponse, chatId?.toString() || 'default')
+            memory.addInteraction(input, finalResponse, chatId?.toString() || "default")
                 .catch(err => console.warn("[Memory] Background interaction persistence warning:", err.message));
             Telemetry.broadcast("status_update", { event: "flow_complete" });
             return;
         }
 
-        // ◄── DIRECT SEARCH FAST-PATH (Single-action pure search queries only) ──►
-        const isSearchQuery = /\b(search|find|latest news|google|look up|what is the latest)\b/i.test(lowerInputStr) &&
-            !lowerInputStr.includes("code") &&
-            !lowerInputStr.includes("browse") &&
-            !lowerInputStr.includes("script") &&
-            !lowerInputStr.includes("file") &&
-            !lowerInputStr.includes("save") &&
-            !lowerInputStr.includes("generate");
+        // 4. BROWSER PIPELINE (BrowserSubAgent with mandatory scrape_website tool)
+        if (!isPhoto && intentDecision.primaryAgent === "browser") {
+            if (progressFn) await progressFn("🌐 _Inspecting webpage and reading online documentation..._").catch(() => {});
+            const browserTask: ACPTask = {
+                taskId: `task_brow_${Date.now()}`,
+                parentId: `root_${Date.now()}`,
+                targetAgent: "browser",
+                taskDescription: input,
+                contextPayload: { originalPrompt: input },
+                maxDepth: 1,
+                dependsOn: []
+            };
 
-        if (isSearchQuery && !isPhoto) {
-            DashboardLogger.log(`[SearchFastPath] DIRECT SEARCH FAST-PATH DETECTED — Bypassing planner & invoking web_search tool directly.`);
-            if (progressFn) await progressFn("🔍 _Searching the web for latest updates..._").catch(() => {});
-            const webSearchTool = SkillRegistry.getToolByName("web_search");
-            let rawSearchResults = "";
-            if (webSearchTool) {
-                try {
-                    rawSearchResults = await webSearchTool.invoke({ query: input });
-                } catch (sErr: any) {
-                    rawSearchResults = "Web search service temporarily unavailable.";
-                }
-            }
-
-            const searchSystemPrompt = `You are OpenClaw Echo, a helpful AI assistant.
-Synthesize these web search results clearly and concisely for the user (max 3-4 bullet points or sentences).
-Web Search Results:
-${rawSearchResults}
-
-Context:
-${context}`;
-
-            const searchMessages = [
-                new SystemMessage(searchSystemPrompt),
-                new HumanMessage(input)
-            ];
-
-            let replyText = "";
-            try {
-                const response: any = await invokeWithTimeout(searchMessages, "search_fastpath", {}, parentSignal, requestId);
-                replyText = (response.content as string) || rawSearchResults;
-            } catch (sErr: any) {
-                console.warn("[SearchFastPath] Gemini synthesis timed out or failed. Sending clean formatted search results directly.");
-                replyText = rawSearchResults;
-            }
+            const result = await SubAgentManager.getInstance().delegateTask(browserTask);
+            const finalResponse = result.status === "SUCCESS"
+                ? result.resultData
+                : `⚠️ [BrowserSubAgent Incomplete/Failed]: ${result.error || "Webpage could not be inspected"}`;
 
             if (parentSignal?.aborted) throw new Error("FLOW_ABORTED");
-            await safeReply(replyText);
-            memory.addInteraction(input, replyText, chatId?.toString() || 'default')
+            await safeReply(finalResponse);
+            memory.addInteraction(input, finalResponse, chatId?.toString() || "default")
                 .catch(err => console.warn("[Memory] Background interaction persistence warning:", err.message));
             Telemetry.broadcast("status_update", { event: "flow_complete" });
             return;
         }
 
-        DashboardLogger.log(`[Flow] Step 3: Invoking ModelRouter...`);
+        // 5. MEMORY PIPELINE (MemorySubAgent with persistent SQLite / semantic search)
+        if (!isPhoto && intentDecision.primaryAgent === "memory") {
+            if (progressFn) await progressFn("🧠 _Executing persistent SQLite memory operation..._").catch(() => {});
+            const memTask: ACPTask = {
+                taskId: `task_mem_${Date.now()}`,
+                parentId: `root_${Date.now()}`,
+                targetAgent: "memory",
+                taskDescription: input,
+                contextPayload: { originalPrompt: input },
+                maxDepth: 1,
+                dependsOn: []
+            };
+
+            const result = await SubAgentManager.getInstance().delegateTask(memTask);
+            const finalResponse = result.status === "SUCCESS"
+                ? result.resultData
+                : `⚠️ [MemorySubAgent Incomplete/Failed]: ${result.error || "Memory operation could not be completed"}`;
+
+            if (parentSignal?.aborted) throw new Error("FLOW_ABORTED");
+            await safeReply(finalResponse);
+            memory.addInteraction(input, finalResponse, chatId?.toString() || "default")
+                .catch(err => console.warn("[Memory] Background interaction persistence warning:", err.message));
+            Telemetry.broadcast("status_update", { event: "flow_complete" });
+            return;
+        }
+
+        // 6. CONVERSATION PIPELINE (ConversationSubAgent with mandatory get_conversation_context tool)
+        if (!isPhoto && (intentDecision.primaryAgent === "conversation" || intentDecision.intent === "CONVERSATION")) {
+            if (progressFn) await progressFn("💬 _Retrieving conversation context and local knowledge..._").catch(() => {});
+            const convTask: ACPTask = {
+                taskId: `task_conv_${Date.now()}`,
+                parentId: `root_${Date.now()}`,
+                targetAgent: "conversation",
+                taskDescription: input,
+                contextPayload: { originalPrompt: input, context },
+                maxDepth: 1,
+                dependsOn: []
+            };
+
+            const result = await SubAgentManager.getInstance().delegateTask(convTask);
+            const finalResponse = result.status === "SUCCESS"
+                ? result.resultData
+                : `⚠️ [ConversationSubAgent Incomplete/Failed]: ${result.error || "Unable to retrieve conversation context"}`;
+
+            if (parentSignal?.aborted) throw new Error("FLOW_ABORTED");
+            await safeReply(finalResponse);
+            memory.addInteraction(input, finalResponse, chatId?.toString() || "default")
+                .catch(err => console.warn("[Memory] Background interaction persistence warning:", err.message));
+            Telemetry.broadcast("status_update", { event: "flow_complete" });
+            return;
+        }
+
+        DashboardLogger.log(`[Flow] Step 3: Invoking ModelRouter for general subsystem tool / multimodal query...`);
 
         const toolSelection = ToolSelector.selectTools(input);
         const tools = toolSelection.tools;
@@ -936,6 +909,157 @@ async function telegramHandler(ctx: Context) {
     }
 }
 
+
+// ◄── SECURE DEMO ACCESS-CODE AUTHENTICATION MIDDLEWARE ──►
+bot.use(async (ctx: Context, next: () => Promise<void>) => {
+    const userId = ctx.from?.id ? String(ctx.from.id) : null;
+    if (!userId) {
+        return next();
+    }
+
+    // If demo access authentication is not configured in server environment, pass through
+    if (!authManager.isAuthEnabled()) {
+        return next();
+    }
+
+    const isAuthorized = authManager.isUserAuthorized(userId);
+    const messageText = (ctx.message as any)?.text?.trim();
+
+    // ── CASE 1: AUTHORIZED USER OR ADMINISTRATOR ──
+    if (isAuthorized) {
+        // Admin-only user management commands
+        if (messageText && authManager.isAdmin(userId)) {
+            if (messageText.startsWith("/revoke")) {
+                const parts = messageText.split(/\s+/);
+                const targetId = parts[1]?.trim();
+                if (!targetId) {
+                    await ctx.reply("ℹ️ *Usage:* `/revoke <telegram_user_id>`", { parse_mode: "Markdown" });
+                    return;
+                }
+                const revoked = await authManager.revokeUser(targetId);
+                if (revoked) {
+                    await ctx.reply(`✅ *User Revoked*\n\nUser ID \`${targetId}\` has been revoked and blocked from OpenClaw Echo.`, { parse_mode: "Markdown" });
+                    console.log(`[AuthAdmin] Admin ${userId} revoked demo access for user ${targetId}.`);
+                } else {
+                    await ctx.reply(`⚠️ User ID \`${targetId}\` was not found among active authorized records.`, { parse_mode: "Markdown" });
+                }
+                return;
+            }
+
+            if (messageText === "/authusers" || messageText === "/listusers") {
+                const users = await authManager.listAuthorizedUsers();
+                if (users.length === 0) {
+                    await ctx.reply("ℹ️ No active authorized demo users recorded.");
+                    return;
+                }
+                const formatted = users.map(u => 
+                    `• ID: \`${u.user_id}\` | @${u.username || "anonymous"} | Authorized: ${new Date(u.authorized_at).toLocaleString()}`
+                ).join("\n");
+                await ctx.reply(`👥 *Authorized Demo Users (${users.length}):*\n\n${formatted}`, { parse_mode: "Markdown" });
+                return;
+            }
+        }
+
+        // Proceed to existing command and autonomous agent message handlers
+        return next();
+    }
+
+    // ── CASE 2: UNAUTHORIZED USER - /start WITHOUT CODE ──
+    if (messageText === "/start") {
+        await ctx.reply(
+            "🔒 *OpenClaw Echo — Protected Demo Access*\n\n" +
+            "Welcome! This autonomous multi-agent AI instance is running in **protected demo mode**.\n\n" +
+            "To unlock AI conversations, multi-agent workflows, sandbox tools, and memory, please reply with your **Demo Access Code**.",
+            { parse_mode: "Markdown" }
+        );
+        return;
+    }
+
+    // ── CASE 3: UNAUTHORIZED USER - SUBMITTING CANDIDATE ACCESS CODE ──
+    if (messageText) {
+        let candidateCode = "";
+        if (messageText.startsWith("/start ")) {
+            candidateCode = messageText.substring(7).trim();
+        } else if (messageText.startsWith("/access ")) {
+            candidateCode = messageText.substring(8).trim();
+        } else if (messageText.startsWith("/code ")) {
+            candidateCode = messageText.substring(6).trim();
+        } else if (!messageText.startsWith("/")) {
+            candidateCode = messageText;
+        }
+
+        if (candidateCode) {
+            // Requirement 8: Delete code message where Telegram permissions allow to prevent exposure
+            if (ctx.chat?.type === "private" && ctx.message?.message_id) {
+                try {
+                    await ctx.deleteMessage(ctx.message.message_id);
+                } catch (_) {
+                    // Silently ignore if bot lacks delete permissions
+                }
+            }
+
+            const username = ctx.from?.username || ctx.from?.first_name || "Guest";
+            const result = await authManager.verifyAndAuthorize(userId, candidateCode, {
+                username: ctx.from?.username,
+                firstName: ctx.from?.first_name
+            });
+
+            if (result.success) {
+                console.log(`[Auth] User ${userId} (@${ctx.from?.username || "anon"}) successfully authenticated with access code.`);
+                await ctx.reply(
+                    `✅ *Access Granted!*\n\n` +
+                    `Welcome to OpenClaw Echo, *${username}*!\n\n` +
+                    `Your Telegram user ID (\`${userId}\`) has been authorized.\n\n` +
+                    `*Available Capabilities:*\n` +
+                    `• 🤖 Autonomous Multi-Agent Swarm (Research, Coding, Browser)\n` +
+                    `• 🧠 4-Layer Memory (SQLite, Knowledge Graph, Semantic Core)\n` +
+                    `• 🛠️ Code Execution Sandbox & AST Self-Repair\n` +
+                    `• 🧹 Memory Controls (/clear, /memory, /facts)\n\n` +
+                    `Type any prompt or request to begin!`,
+                    { parse_mode: "Markdown" }
+                );
+                return;
+            }
+
+            if (result.error === "LOCKED_OUT") {
+                const mins = Math.ceil((result.lockoutSec || 900) / 60);
+                console.warn(`[Auth] User ${userId} is locked out. Remaining: ${result.lockoutSec}s.`);
+                await ctx.reply(
+                    `⏳ *Authentication Locked*\n\n` +
+                    `Too many consecutive failed attempts. For security, access is temporarily locked.\n\n` +
+                    `Please try again in *${mins} minute(s)*.`,
+                    { parse_mode: "Markdown" }
+                );
+                return;
+            }
+
+            // Invalid code (Requirement 4 & 8: never log candidate code)
+            console.warn(`[Auth] Failed demo access code attempt for user ${userId}. Remaining attempts: ${result.remainingAttempts}`);
+            const remaining = result.remainingAttempts ?? 0;
+            const attemptWarning = remaining > 0
+                ? `⚠️ *${remaining} attempt(s) remaining* before a 15-minute lockout.`
+                : `🚫 *You have been locked out for 15 minutes.*`;
+
+            await ctx.reply(
+                `❌ *Invalid Access Code*\n\n` +
+                `The access code you entered is incorrect.\n\n` +
+                `${attemptWarning}\n\n` +
+                `Please verify the code provided by your demonstrator and try again.`,
+                { parse_mode: "Markdown" }
+            );
+            return;
+        }
+    }
+
+    // ── CASE 4: UNAUTHORIZED USER - BLOCKED FROM ALL OTHER COMMANDS/ACTIONS ──
+    await ctx.reply(
+        "⛔ *Unauthorized Access*\n\n" +
+        "You must authenticate before using OpenClaw Echo.\n\n" +
+        "Please send /start to enter your demo access code.",
+        { parse_mode: "Markdown" }
+    );
+});
+
 bot.command("start", (ctx) => ctx.reply("🚀 OpenClaw Echo is online and ready! Port: " + PORT));
 
 bot.command("clear", async (ctx) => {
@@ -1041,10 +1165,25 @@ bot.on(message("photo"), telegramHandler);
 
 app.get("/", async (req: Request, res: Response) => {
     try {
+        const reactDashboard = path.join(dashboardPath, "index.html");
+        try {
+            await fs.access(reactDashboard);
+            return res.sendFile(reactDashboard);
+        } catch (_) {
+            const publicDashboardPath = path.resolve("public/dashboard.html");
+            return res.sendFile(publicDashboardPath);
+        }
+    } catch (err) {
+        res.status(500).send("OpenClaw Echo: Dashboard Error.");
+    }
+});
+
+app.get("/telemetry", async (req: Request, res: Response) => {
+    try {
         const publicDashboardPath = path.resolve("public/dashboard.html");
         res.sendFile(publicDashboardPath);
     } catch (err) {
-        res.status(500).send("OpenClaw Echo: Dashboard Error.");
+        res.status(500).send("OpenClaw Echo: Telemetry Dashboard Error.");
     }
 });
 
@@ -1300,9 +1439,13 @@ export const startServer = async (initialPort?: number) => {
         process.exit(1);
     }
 
+    // Initialize Auth Persistence & Preload Active Users Cache
+    await authManager.init();
+
     const mode = (process.env.TELEGRAM_MODE || "polling").toLowerCase();
     const basePort = initialPort || parseInt(process.env.PORT || "3005");
-    const MAX_ATTEMPTS = 10;
+    const isProduction = process.env.NODE_ENV === "production" || !!process.env.RENDER;
+    const MAX_ATTEMPTS = isProduction ? 1 : 10;
 
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
         const currentPort = basePort + attempt;
@@ -1327,7 +1470,7 @@ export const startServer = async (initialPort?: number) => {
             if (mode === "disabled" || mode === "off" || mode === "none") {
                 DashboardLogger.log("ℹ️ Telegram integration disabled via TELEGRAM_MODE=disabled.");
             } else if (mode === "webhook") {
-                const webhookUrlBase = process.env.TELEGRAM_WEBHOOK_URL || (process.env.RAILWAY_STATIC_URL ? `https://${process.env.RAILWAY_STATIC_URL}` : "");
+                const webhookUrlBase = process.env.TELEGRAM_WEBHOOK_URL || (process.env.RENDER_EXTERNAL_URL ? process.env.RENDER_EXTERNAL_URL : (process.env.RAILWAY_STATIC_URL ? `https://${process.env.RAILWAY_STATIC_URL}` : ""));
                 if (!webhookUrlBase) {
                     console.error("[Telegram] TELEGRAM_WEBHOOK_URL missing for webhook mode.");
                 } else {
@@ -1412,6 +1555,12 @@ export const stopServer = async (server: any, signal: string = "SIGTERM") => {
         try {
             Clockwork.stop();
         } catch (e) { }
+        try {
+            await authManager.close();
+            console.log("[Auth] Database connection closed.");
+        } catch (e: any) {
+            console.warn("[Auth] Warning closing auth database:", e.message);
+        }
         if (memory && typeof (memory as any).close === "function") {
             try {
                 await (memory as any).close();

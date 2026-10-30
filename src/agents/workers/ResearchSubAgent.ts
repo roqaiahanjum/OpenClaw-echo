@@ -92,6 +92,10 @@ Provide a clear, structured research summary in 3-4 concise bullet points with c
                 taskId: task.taskId,
                 targetAgent: this.agentType,
                 status: toolSuccess ? "SUCCESS" : "FAILED",
+                toolName: "web_search",
+                toolOutput: webResults,
+                verified: toolSuccess,
+                verificationReason: toolSuccess ? "Web search results gathered and synthesized" : "Web search API unavailable or returned empty result",
                 resultData: toolSuccess ? `### Research Synthesis\n\n${synthesis.trim()}` : `⚠️ [ResearchSubAgent Partial]: ${webResults}`,
                 error: toolSuccess ? undefined : webResults,
                 executionTimeMs

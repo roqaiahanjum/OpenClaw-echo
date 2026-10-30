@@ -275,6 +275,10 @@ Rules:
                 taskId: task.taskId,
                 targetAgent: this.agentType,
                 status: overallSuccess ? "SUCCESS" : "FAILED",
+                toolName: shouldExecute ? "run_sandbox_code" : "write_sandbox_file",
+                toolOutput: { savedFileReport, executionReport },
+                verified: overallSuccess,
+                verificationReason: overallSuccess ? (shouldExecute ? "Code written, verified on disk, and executed successfully" : "Code syntax validated and file verified on disk") : "Code execution or disk verification failed",
                 resultData: overallSuccess ? resultData : `⚠️ [CodingSubAgent Failure]: ${!isCodeValid ? (!syntaxResult.valid ? syntaxResult.error : safetyResult.reason) : (shouldExecute && !executionSuccess ? 'Execution failed' : 'File write failed')}\n\n${resultData}`,
                 error: overallSuccess ? undefined : (syntaxResult.error || safetyResult.reason || writeToolResult),
                 executionTimeMs

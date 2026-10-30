@@ -1,8 +1,11 @@
 // @ts-nocheck
 import { ACPTask, ACPResult, TargetAgentType, WorkerAgent } from "./types";
+import { ConversationSubAgent } from "./workers/ConversationSubAgent";
 import { ResearchSubAgent } from "./workers/ResearchSubAgent";
 import { CodingSubAgent } from "./workers/CodingSubAgent";
+import { MemorySubAgent } from "./workers/MemorySubAgent";
 import { BrowserSubAgent } from "./workers/BrowserSubAgent";
+import { PlannerSubAgent } from "./workers/PlannerSubAgent";
 import { DashboardLogger } from "../core/logger";
 
 export class SubAgentManager {
@@ -10,9 +13,12 @@ export class SubAgentManager {
     private workers: Map<TargetAgentType, WorkerAgent> = new Map();
 
     private constructor() {
+        this.registerWorker(new ConversationSubAgent());
         this.registerWorker(new ResearchSubAgent());
         this.registerWorker(new CodingSubAgent());
+        this.registerWorker(new MemorySubAgent());
         this.registerWorker(new BrowserSubAgent());
+        this.registerWorker(new PlannerSubAgent());
     }
 
     public static getInstance(): SubAgentManager {
@@ -25,6 +31,10 @@ export class SubAgentManager {
     public registerWorker(worker: WorkerAgent): void {
         this.workers.set(worker.agentType, worker);
         console.log(`[SubAgentManager] Registered sub-agent worker: ${worker.agentType}`);
+    }
+
+    public getWorker(type: TargetAgentType): WorkerAgent | undefined {
+        return this.workers.get(type);
     }
 
     public async delegateTask(task: ACPTask): Promise<ACPResult> {

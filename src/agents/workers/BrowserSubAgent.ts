@@ -136,6 +136,10 @@ ${synthesis.trim()}`
                 taskId: task.taskId,
                 targetAgent: this.agentType,
                 status: toolSuccess ? "SUCCESS" : "FAILED",
+                toolName: "browse_webpage",
+                toolOutput: scrapeOutput,
+                verified: toolSuccess,
+                verificationReason: toolSuccess ? "Webpage browsed and content extracted successfully" : "Webpage browsing or SSRF validation failed",
                 resultData,
                 error: toolSuccess ? undefined : scrapeOutput,
                 executionTimeMs

@@ -10,7 +10,7 @@ export interface ToolSelectionResult {
 
 /**
  * Domain-specific tool mappings.
- * Categorizes the 23 tools into targeted functional domains to prevent
+ * Categorizes registered tools into targeted functional domains to prevent
  * schema bloat and preserve LLM token limits (especially Groq 8,000 TPM).
  */
 const TOOL_DOMAINS: Record<string, { toolNames: string[]; keywords: RegExp }> = {
@@ -61,14 +61,17 @@ const TOOL_DOMAINS: Record<string, { toolNames: string[]; keywords: RegExp }> = 
     time: {
         toolNames: ["get_current_time"],
         keywords: /\b(what time|current time|what is the time|today's date|current date|what day is it|clock)\b/i
+    },
+    conversation: {
+        toolNames: ["get_conversation_context"],
+        keywords: /\b(hi|hello|hey|greetings|who are you|what is openclaw|how are you|thanks|thank you)\b/i
     }
 };
 
 /**
  * Compact core toolkit used when an action query does not strictly match a single domain.
- * Total tokens: ~1,500 (well within Groq's 8,000 TPM limit).
  */
-const DEFAULT_CORE_TOOLS = ["web_search", "local_file_system", "run_sandbox_code", "search_memory", "manage_project_goals"];
+const DEFAULT_CORE_TOOLS = ["get_conversation_context", "web_search", "local_file_system", "run_sandbox_code", "search_memory", "manage_project_goals"];
 
 export class ToolSelector {
     /**
@@ -104,17 +107,19 @@ export class ToolSelector {
             };
         }
 
-        // 3. Conversational Fast-Path (0 tools needed when no domain tools matched)
+        // 3. Conversational Pipeline: Load conversationContextTool (mandatory tool-driven pipeline)
         if (isSimpleConversation(trimmed)) {
+            const convTool = SkillRegistry.getToolByName("get_conversation_context");
+            const tools = convTool ? [convTool] : [];
             return {
-                tools: [],
-                category: "conversational",
-                tokenEstimate: 0,
-                reason: "Conversational greeting or direct question requires no external tools."
+                tools,
+                category: "conversation",
+                tokenEstimate: tools.length * 200,
+                reason: "Conversational query: loaded get_conversation_context tool for grounded dialogue."
             };
         }
 
-        // 4. Fallback for unclassified queries requiring capabilities: Load compact core set
+        // 4. Fallback for unclassified queries: Load compact core set (guaranteeing at least 1 tool)
         const coreTools = DEFAULT_CORE_TOOLS
             .map(name => SkillRegistry.getToolByName(name))
             .filter(Boolean);
@@ -123,7 +128,7 @@ export class ToolSelector {
             tools: coreTools,
             category: "core_default",
             tokenEstimate: coreTools.length * 360,
-            reason: `Unclassified action query: loaded compact core toolkit (${coreTools.length} tools).`
+            reason: `Unclassified query: loaded compact core toolkit (${coreTools.length} tools).`
         };
     }
 }
