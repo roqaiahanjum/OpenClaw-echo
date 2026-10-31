@@ -2,20 +2,21 @@
 import dotenv from 'dotenv';
 import path from 'path';
 
-// Load .env with absolute path — works from any working directory
-dotenv.config({ 
-  path: path.resolve(__dirname, '../../.env')
-});
-
-// Fallback: also try current directory
+// Load .env from cwd or relative parent paths
+dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 if (!process.env.GOOGLE_API_KEY && !process.env.GEMINI_API_KEY) {
-  dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+  dotenv.config({ path: path.resolve(__dirname, '../.env') });
+}
+if (!process.env.GOOGLE_API_KEY && !process.env.GEMINI_API_KEY) {
+  dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 }
 
-// ✅ Fix for Railway deployment
+// ✅ Fix for deployment environments (polyfill File if needed)
 if (typeof File === "undefined") {
-    const { File } = require("buffer");
-    global.File = File;
+    try {
+        const { File } = require("buffer");
+        global.File = File;
+    } catch (_) {}
 }
 
 /**
@@ -54,7 +55,7 @@ async function bootstrap() {
 
         const { startServer, stopServer } = await import("./integrations/telegram");
         const server = await startServer();
-        console.log("[System] System Online - Railway Deployment Ready");
+        console.log("[System] System Online - Cloud Deployment Ready (Render / Railway / Local)");
 
         let isShuttingDown = false;
         const handleShutdown = async (signal: string) => {

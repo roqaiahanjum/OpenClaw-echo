@@ -19,7 +19,8 @@
     "lint": "echo Lint skipped - ts-nocheck active on tools.ts",
     "test": "jest",
     "test:tools": "npx ts-node --transpile-only scratch/test_all_tools.ts",
-    "eval": "npx ts-node scratch/eval_metrics.ts"
+    "eval": "npx ts-node scratch/eval_metrics.ts",
+    "auth:generate-hash": "ts-node --transpile-only scripts/generate_access_hash.ts"
   },
   "keywords": [
     "ai",
@@ -35,9 +36,8 @@
     "@google/generative-ai": "^0.24.1",
     "@langchain/classic": "^1.0.31",
     "@langchain/community": "^1.1.27",
-    "@langchain/core": "^1.1.40",
+    "@langchain/core": "^1.1.41",
     "@langchain/google-genai": "^2.1.28",
-    "@langchain/ollama": "^0.1.6",
     "@types/nodemailer": "^8.0.0",
     "axios": "^1.15.0",
     "cheerio": "^1.2.0",
