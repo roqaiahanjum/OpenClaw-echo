@@ -24,8 +24,11 @@ async function runPrestartRestore() {
         process.env.R2_SECRET_ACCESS_KEY
     );
 
-    if (process.env.DATABASE_DRIVER === "turso") {
-        console.log("🚀 DATABASE_DRIVER=turso detected. Managed libSQL cloud database is active; bypassing local SQLite file restoration.");
+    const driver = (process.env.DATABASE_DRIVER || "").trim().toLowerCase();
+    const hasTurso = driver === "turso" || Boolean(process.env.TURSO_DATABASE_URL || process.env.TURSO_DATABASE_UR);
+
+    if (hasTurso) {
+        console.log("🚀 Turso Cloud persistence active (DATABASE_DRIVER=turso). Managed libSQL database active; bypassing local SQLite file restoration.");
         return;
     }
 
@@ -120,3 +123,4 @@ runPrestartRestore().catch((err) => {
     console.error("Prestart verification failed:", err);
     process.exit(1);
 });
+

@@ -437,8 +437,14 @@ export class DatabaseConnectionFactory {
             const tursoUrl = process.env.TURSO_DATABASE_URL || process.env.TURSO_DATABASE_UR;
             const tursoToken = process.env.TURSO_AUTH_TOKEN;
 
-            if ((driver === "turso" || (!driver && tursoUrl)) && tursoUrl) {
+            if (driver === "turso") {
+                if (!tursoUrl) {
+                    throw new Error("[DatabaseFactory] FATAL: DATABASE_DRIVER is set to 'turso', but TURSO_DATABASE_URL is missing. Startup aborted to prevent silent fallback to local SQLite.");
+                }
                 console.log("[DatabaseFactory] Initializing Turso Cloud Database Adapter...");
+                DatabaseConnectionFactory.instance = new TursoDatabaseAdapter(tursoUrl, tursoToken);
+            } else if (!driver && tursoUrl) {
+                console.log("[DatabaseFactory] Initializing Turso Cloud Database Adapter (inferred from TURSO_DATABASE_URL)...");
                 DatabaseConnectionFactory.instance = new TursoDatabaseAdapter(tursoUrl, tursoToken);
             } else {
                 console.log("[DatabaseFactory] Initializing Local SQLite Adapter (Default)...");

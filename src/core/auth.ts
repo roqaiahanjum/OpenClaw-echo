@@ -1,6 +1,7 @@
 import * as crypto from "crypto";
 import sqlite3 from "sqlite3";
 import { SQLITE_DB_PATH } from "./storage";
+import { DatabaseConnectionFactory, IDatabaseConnection, SqliteDatabaseAdapter } from "../memory/dbAdapter";
 
 /**
  * OpenClaw Echo — Demo Access Code & User Authentication Engine
@@ -157,16 +158,29 @@ export class AuthRateLimiter {
 
 export class AuthManager {
     private static instance: AuthManager;
-    private db: sqlite3.Database | null = null;
-    private dbPath: string;
+    private customDbPath?: string;
+    private dbConnection: IDatabaseConnection | null = null;
     private authorizedCache: Set<string> = new Set();
     private rateLimiter: AuthRateLimiter;
     private isInitialized: boolean = false;
     private initPromise: Promise<void> | null = null;
 
     private constructor(dbPath?: string, rateLimiter?: AuthRateLimiter) {
-        this.dbPath = dbPath || SQLITE_DB_PATH;
+        if (dbPath && dbPath !== SQLITE_DB_PATH) {
+            this.customDbPath = dbPath;
+        }
         this.rateLimiter = rateLimiter || new AuthRateLimiter(5, 15 * 60 * 1000);
+    }
+
+    private get db(): IDatabaseConnection {
+        if (!this.dbConnection) {
+            if (this.customDbPath) {
+                this.dbConnection = new SqliteDatabaseAdapter(this.customDbPath);
+            } else {
+                this.dbConnection = DatabaseConnectionFactory.getConnection();
+            }
+        }
+        return this.dbConnection;
     }
 
     public static getInstance(dbPath?: string, rateLimiter?: AuthRateLimiter): AuthManager {
@@ -180,9 +194,9 @@ export class AuthManager {
      * Resets singleton instance (primarily for automated testing environments).
      */
     public static resetInstance(): void {
-        if (AuthManager.instance && AuthManager.instance.db) {
+        if (AuthManager.instance && AuthManager.instance.dbConnection) {
             try {
-                AuthManager.instance.db.close();
+                AuthManager.instance.dbConnection.close().catch(() => {});
             } catch (_) {}
         }
         (AuthManager as any).instance = undefined;
@@ -192,14 +206,9 @@ export class AuthManager {
         if (this.isInitialized) return;
         if (this.initPromise) return this.initPromise;
 
-        this.initPromise = new Promise<void>((resolve, reject) => {
-            this.db = new sqlite3.Database(this.dbPath, (err) => {
-                if (err) {
-                    console.error("[Auth] SQLite Connection Error:", err.message);
-                    return reject(err);
-                }
-
-                this.db!.run(`
+        this.initPromise = (async () => {
+            try {
+                await this.db.exec(`
                     CREATE TABLE IF NOT EXISTS authorized_users (
                         user_id TEXT PRIMARY KEY,
                         username TEXT,
@@ -207,30 +216,21 @@ export class AuthManager {
                         authorized_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                         status TEXT DEFAULT 'active'
                     )
-                `, (tableErr) => {
-                    if (tableErr) {
-                        console.error("[Auth] Failed to create authorized_users table:", tableErr.message);
-                        return reject(tableErr);
-                    }
+                `);
 
-                    // Preload active authorized user IDs into memory cache
-                    this.db!.all(
-                        `SELECT user_id FROM authorized_users WHERE status = 'active'`,
-                        [],
-                        (queryErr, rows: { user_id: string }[]) => {
-                            if (queryErr) {
-                                console.warn("[Auth] Warning loading authorized users:", queryErr.message);
-                            } else if (rows) {
-                                rows.forEach(r => this.authorizedCache.add(String(r.user_id)));
-                                console.log(`[Auth] Loaded ${this.authorizedCache.size} authorized user(s) into cache.`);
-                            }
-                            this.isInitialized = true;
-                            resolve();
-                        }
-                    );
-                });
-            });
-        });
+                const rows = await this.db.all<{ user_id: string }>(
+                    `SELECT user_id FROM authorized_users WHERE status = 'active'`
+                );
+                if (rows) {
+                    rows.forEach(r => this.authorizedCache.add(String(r.user_id)));
+                    console.log(`[Auth] Loaded ${this.authorizedCache.size} authorized user(s) into cache.`);
+                }
+                this.isInitialized = true;
+            } catch (err: any) {
+                console.error("[Auth] Database initialization error:", err.message);
+                throw err;
+            }
+        })();
 
         return this.initPromise;
     }
@@ -344,91 +344,52 @@ export class AuthManager {
         const uid = String(userId).trim();
         this.authorizedCache.add(uid);
 
-        if (!this.db) {
-            return;
-        }
-
-        return new Promise<void>((resolve, reject) => {
-            const sql = `
-                INSERT OR REPLACE INTO authorized_users (user_id, username, first_name, authorized_at, status)
-                VALUES (?, ?, ?, CURRENT_TIMESTAMP, 'active')
-            `;
-            this.db!.run(sql, [uid, meta?.username || null, meta?.firstName || null], (err) => {
-                if (err) {
-                    console.error("[Auth] Error persisting authorized user to SQLite:", err.message);
-                    return reject(err);
-                }
-                resolve();
-            });
-        });
+        const sql = `
+            INSERT OR REPLACE INTO authorized_users (user_id, username, first_name, authorized_at, status)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP, 'active')
+        `;
+        await this.db.run(sql, [uid, meta?.username || null, meta?.firstName || null]);
     }
 
     /**
-     * Revokes a user's authorization in SQLite and removes them from the in-memory cache.
+     * Revokes a user's authorization in the database and removes them from the in-memory cache.
      */
     public async revokeUser(userId: string | number): Promise<boolean> {
         const uid = String(userId).trim();
         this.authorizedCache.delete(uid);
 
-        if (!this.db) {
-            return true;
-        }
-
-        return new Promise<boolean>((resolve, reject) => {
-            const sql = `UPDATE authorized_users SET status = 'revoked' WHERE user_id = ? AND status = 'active'`;
-            this.db!.run(sql, [uid], function (err) {
-                if (err) {
-                    console.error("[Auth] Error revoking user in SQLite:", err.message);
-                    return reject(err);
-                }
-                resolve(this.changes > 0);
-            });
-        });
+        const sql = `UPDATE authorized_users SET status = 'revoked' WHERE user_id = ? AND status = 'active'`;
+        const res = await this.db.run(sql, [uid]);
+        return (res.changes || 0) > 0;
     }
 
     /**
      * Returns a list of currently active authorized users.
      */
     public async listAuthorizedUsers(): Promise<AuthorizedUserRecord[]> {
-        if (!this.db) {
-            return Array.from(this.authorizedCache).map(id => ({
-                user_id: id,
-                authorized_at: new Date().toISOString(),
-                status: "active"
-            }));
-        }
-
-        return new Promise<AuthorizedUserRecord[]>((resolve, reject) => {
-            const sql = `
-                SELECT user_id, username, first_name, authorized_at, status 
-                FROM authorized_users 
-                WHERE status = 'active' 
-                ORDER BY authorized_at DESC
-            `;
-            this.db!.all(sql, [], (err, rows: AuthorizedUserRecord[]) => {
-                if (err) {
-                    console.error("[Auth] Error listing authorized users:", err.message);
-                    return reject(err);
-                }
-                resolve(rows || []);
-            });
-        });
+        const sql = `
+            SELECT user_id, username, first_name, authorized_at, status 
+            FROM authorized_users 
+            WHERE status = 'active' 
+            ORDER BY authorized_at DESC
+        `;
+        const rows = await this.db.all<AuthorizedUserRecord>(sql, []);
+        return rows || [];
     }
 
     /**
      * Safely closes the database connection.
      */
     public async close(): Promise<void> {
-        if (!this.db) return;
-        return new Promise<void>((resolve) => {
-            this.db!.close((err) => {
-                if (err) console.warn("[Auth] Warning closing auth database:", err.message);
-                this.db = null;
-                this.isInitialized = false;
-                this.initPromise = null;
-                resolve();
-            });
-        });
+        if (!this.dbConnection) return;
+        try {
+            await this.dbConnection.close();
+        } catch (err: any) {
+            console.warn("[Auth] Warning closing auth database:", err.message);
+        }
+        this.dbConnection = null;
+        this.isInitialized = false;
+        this.initPromise = null;
     }
 }
 
