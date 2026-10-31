@@ -8,7 +8,7 @@ FROM node:22-alpine AS dashboard-builder
 WORKDIR /build
 
 COPY dashboard/package*.json ./
-RUN npm install --legacy-peer-deps --legacy-peer-deps
+RUN npm install --legacy-peer-deps
 
 COPY dashboard/ ./
 RUN npm run build
@@ -19,11 +19,11 @@ FROM node:22-alpine
 WORKDIR /app
 
 # Install curl for healthchecks
-RUN apk add --no-cache curl
+RUN apk add --no-cache curl python3 make g++
 
 # Install backend dependencies (includes devDeps for ts-node)
 COPY package*.json ./
-RUN npm install --legacy-peer-deps
+RUN npm install --legacy-peer-deps --build-from-source=sqlite3
 
 # Copy backend source
 COPY src/ ./src/
