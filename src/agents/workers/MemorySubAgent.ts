@@ -8,6 +8,7 @@ import { SystemMessage, HumanMessage } from "@langchain/core/messages";
  *
  * Dedicated subagent for persistent memory storage, retrieval, and knowledge recall.
  * Uses real SQLite and semantic memory tools. Never fabricates memories.
+ * Strictly respects multi-user isolation via chatId.
  */
 export class MemorySubAgent implements WorkerAgent {
     public readonly agentType = "memory" as const;
@@ -17,53 +18,69 @@ export class MemorySubAgent implements WorkerAgent {
         console.log(`[MemorySubAgent] Executing task ${task.taskId}: "${task.taskDescription}"`);
 
         const lower = task.taskDescription.toLowerCase();
+        const chatId = task.contextPayload?.chatId ? String(task.contextPayload.chatId) : "default";
 
         try {
             let toolName = "search_memory";
             let toolArgs: any = {};
             let isWriteOperation = false;
 
-            // 1. Route to Write or Read Tool
-            const isReadQuery = lower.startsWith("what") || lower.startsWith("which") || lower.startsWith("search") || lower.startsWith("recall") || lower.startsWith("find") || lower.includes("what did i save") || lower.includes("what have i saved");
+            // 1. Identify Read vs Write Operations
+            const isNameQuery = /\b(?:what(?:'s|\s+is)\s+my\s+name|who\s+am\s+i|do\s+you\s+(?:know|remember)\s+my\s+name|tell\s+me\s+my\s+name|what\s+is\s+my\s+identity)\b/i.test(lower);
+            const isReadQuery = isNameQuery ||
+                /\b(?:what\s+did\s+i\s+save|what\s+do\s+you\s+remember|what\s+have\s+i\s+saved|what\s+is\s+saved|search|recall|find|list\s+knowledge|all\s+facts|memory\s+stats|how\s+many\s+facts)\b/i.test(lower) ||
+                lower.startsWith("what") || lower.startsWith("which") || lower.startsWith("search") || lower.startsWith("recall") || lower.startsWith("find");
 
-            if (!isReadQuery && (lower.startsWith("remember") || lower.startsWith("save") || lower.startsWith("store") || lower.includes("remember that") || lower.includes("save this") || lower.includes("store this"))) {
+            const nameMatch = task.taskDescription.match(
+                /(?:remember\s+(?:that\s+)?my\s+name\s+is|my\s+name\s+is|call\s+me|i\s+am)\s+([A-Za-z0-9\s'-]+?)(?:\.|\!|,|\s+please|\s+remember|\s+save|\s+and|$)/i
+            );
+            const hasRememberDirective = /\b(?:remember|save|store|memorize|keep\s+in\s+mind|note\s+down)\b/i.test(lower);
+
+            if (!isReadQuery && (hasRememberDirective || nameMatch || lower.includes("remember") || lower.includes("save") || lower.includes("store"))) {
                 isWriteOperation = true;
                 toolName = "save_knowledge";
 
-                // Extract key and value
-                let key = "user_preference";
+                let category = "user_memory";
+                let key = "custom_fact";
                 let value = task.taskDescription;
 
-                const matchThat = task.taskDescription.match(/(?:remember|store|save)\s+(?:that\s+)?(.+)/i);
-                if (matchThat && matchThat[1]) {
-                    value = matchThat[1].trim();
-                    // generate a clean slug key
-                    key = value.slice(0, 30).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "custom_fact";
+                if (nameMatch && nameMatch[1] && !["a", "the", "building", "working", "going", "here", "ready"].includes(nameMatch[1].toLowerCase().trim())) {
+                    category = "user_profile";
+                    key = "user_name";
+                    value = nameMatch[1].trim();
+                } else {
+                    const matchThat = task.taskDescription.match(/(?:remember|store|save|memorize)\s+(?:that\s+)?(?:my\s+)?(.+)/i);
+                    if (matchThat && matchThat[1]) {
+                        value = matchThat[1].trim();
+                        key = value.slice(0, 30).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "custom_fact";
+                    }
                 }
 
                 toolArgs = {
-                    category: "user_memory",
+                    category,
                     key,
                     value,
-                    confidence: 1.0
+                    confidence: 1.0,
+                    chatId
                 };
             } else if (lower.includes("all facts") || lower.includes("what do you know") || lower.includes("list knowledge")) {
                 toolName = "get_all_knowledge";
-                toolArgs = {};
+                toolArgs = { chatId };
             } else if (lower.includes("stats") || lower.includes("how many facts")) {
                 toolName = "get_memory_stats";
                 toolArgs = {};
+            } else if (isNameQuery) {
+                toolName = "search_memory";
+                toolArgs = { query: "user_name", chatId };
             } else {
-                // Default to search_memory
                 toolName = "search_memory";
                 let query = task.taskDescription;
                 const searchMatch = task.taskDescription.match(/(?:search for|search|recall|find|what did i save about|what did i save|what have i saved|tell me about|about)\s+(.+)/i);
                 if (searchMatch && searchMatch[1]) {
                     query = searchMatch[1].trim();
                 }
-                // Strip punctuation and trailing question marks for cleaner SQLite substring matching
                 query = query.replace(/[?!.,;]/g, "").trim();
-                toolArgs = { query };
+                toolArgs = { query, chatId };
             }
 
             // 2. Execute Real Registered Memory Tool
@@ -78,6 +95,21 @@ export class MemorySubAgent implements WorkerAgent {
             const outputStr = String(rawOutput);
 
             console.log(`[StructuredLog] [TaskId:${task.taskId}] [Agent:MemorySubAgent] [Tool:${toolName}] [Status:SUCCESS] [DurationMs:${toolDuration}]`);
+
+            // Check if persistence operation failed
+            if (isWriteOperation && (outputStr.startsWith("Failed") || outputStr.startsWith("Error") || outputStr.includes("Save Fact Error"))) {
+                return {
+                    taskId: task.taskId,
+                    targetAgent: this.agentType,
+                    status: "FAILED",
+                    toolName,
+                    toolOutput: outputStr,
+                    verified: false,
+                    error: outputStr,
+                    resultData: `⚠️ [Memory Persistence Failed]: Unable to save fact to persistent memory. ${outputStr}`,
+                    executionTimeMs: Date.now() - startTime
+                };
+            }
 
             // 3. Grounded Synthesis
             let finalMessage = "";

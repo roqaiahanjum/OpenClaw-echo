@@ -11,6 +11,7 @@ import { KnowledgeGraphManager } from "./KnowledgeGraphManager";
 import { extractAndStoreTriples } from "./graphExtractor";
 import { DashboardLogger } from "../core/logger";
 import { SQLITE_DB_PATH, SEMANTIC_CORE_PATH, ensureStorageDirectories } from "../core/storage";
+import { DatabaseConnectionFactory, IDatabaseConnection } from "./dbAdapter";
 
 // Load .env with absolute path — works from any working directory
 dotenv.config({ 
@@ -31,6 +32,7 @@ interface SerializedVector {
 
 export interface KnowledgeFact {
     id: string;
+    chat_id?: string;
     category: string;
     key: string;
     value: string;
@@ -42,22 +44,17 @@ export type MemoryType = "USER_FACT" | "CONVERSATION" | "KNOWLEDGE" | "SUMMARY";
 
 export class MemoryManager {
     private static instance: MemoryManager;
-    private db: sqlite3.Database;
     private vectorStore: MemoryVectorStore | null = null;
     private embeddings: GoogleGenerativeAIEmbeddings;
     private storagePath: string = SEMANTIC_CORE_PATH;
     private isInitialized: boolean = false;
     private embeddingCache = new Map<string, number[]>();
 
-    private constructor() {
-        this.db = new sqlite3.Database(SQLITE_DB_PATH, (err) => {
-            if (err) {
-                console.error("[Memory] SQLite Connection Error:", err.message);
-            } else {
-                console.log(`[Memory] SQLite Connected (${SQLITE_DB_PATH}).`);
-            }
-        });
+    private get db(): IDatabaseConnection {
+        return DatabaseConnectionFactory.getConnection();
+    }
 
+    private constructor() {
         const apiKey = 
             process.env.GOOGLE_API_KEY || 
             process.env.GEMINI_API_KEY || 
@@ -74,6 +71,10 @@ export class MemoryManager {
             MemoryManager.instance = new MemoryManager();
         }
         return MemoryManager.instance;
+    }
+
+    public static resetInstance(): void {
+        MemoryManager.instance = undefined as any;
     }
 
     public async initialize(): Promise<void> {
@@ -96,20 +97,12 @@ export class MemoryManager {
                     )
                 `);
 
-                this.db.run(`PRAGMA table_info(interactions)`, (err, rows) => {
-                    this.db.run(`ALTER TABLE interactions ADD COLUMN chat_id TEXT DEFAULT 'default'`, () => { });
+                this.db.all(`PRAGMA table_info(interactions)`, (err, rows: any[]) => {
+                    const hasChatId = (rows || []).some((r: any) => r.name === 'chat_id');
+                    if (!hasChatId) {
+                        this.db.run(`ALTER TABLE interactions ADD COLUMN chat_id TEXT DEFAULT 'default'`, () => { });
+                    }
                 });
-
-                this.db.run(`
-                    CREATE TABLE IF NOT EXISTS knowledge (
-                        id TEXT PRIMARY KEY,
-                        category TEXT,
-                        key TEXT UNIQUE,
-                        value TEXT,
-                        confidence REAL DEFAULT 1.0,
-                        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-                    )
-                `);
 
                 this.db.run(`
                     CREATE TABLE IF NOT EXISTS summaries (
@@ -119,9 +112,61 @@ export class MemoryManager {
                         summary_text TEXT,
                         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
                     )
-                `, (err) => {
-                    if (err) reject(err);
-                    else resolve();
+                `);
+
+                // Ensure knowledge table supports per-user isolation with composite uniqueness on (chat_id, key)
+                this.db.all(`SELECT sql FROM sqlite_master WHERE type='table' AND name='knowledge'`, (err, rows: any[]) => {
+                    if (err) return reject(err);
+                    if (!rows || rows.length === 0) {
+                        this.db.run(`
+                            CREATE TABLE IF NOT EXISTS knowledge (
+                                id TEXT PRIMARY KEY,
+                                chat_id TEXT DEFAULT 'default',
+                                category TEXT,
+                                key TEXT,
+                                value TEXT,
+                                confidence REAL DEFAULT 1.0,
+                                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                                UNIQUE(chat_id, key)
+                            )
+                        `, (createErr) => {
+                            if (createErr) reject(createErr);
+                            else {
+                                this.db.run(`CREATE INDEX IF NOT EXISTS idx_knowledge_chat_key ON knowledge(chat_id, key)`, () => resolve());
+                            }
+                        });
+                    } else {
+                        const createSql = rows[0]?.sql || "";
+                        if (createSql.includes("key TEXT UNIQUE") || !createSql.includes("chat_id")) {
+                            console.log("[Memory] Migrating legacy knowledge table to support multi-user isolation...");
+                            this.db.serialize(() => {
+                                this.db.run(`
+                                    CREATE TABLE IF NOT EXISTS knowledge_v2 (
+                                       id TEXT PRIMARY KEY,
+                                       chat_id TEXT DEFAULT 'default',
+                                       category TEXT,
+                                       key TEXT,
+                                       value TEXT,
+                                       confidence REAL DEFAULT 1.0,
+                                       timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                                       UNIQUE(chat_id, key)
+                                    )
+                                `);
+                                this.db.run(`
+                                    INSERT OR IGNORE INTO knowledge_v2 (id, chat_id, category, key, value, confidence, timestamp)
+                                    SELECT id, 'default', category, key, value, confidence, timestamp FROM knowledge
+                                `);
+                                this.db.run(`DROP TABLE knowledge`);
+                                this.db.run(`ALTER TABLE knowledge_v2 RENAME TO knowledge`);
+                                this.db.run(`CREATE INDEX IF NOT EXISTS idx_knowledge_chat_key ON knowledge(chat_id, key)`, (idxErr) => {
+                                    if (idxErr) console.warn("[Memory] Index creation warning:", idxErr.message);
+                                    resolve();
+                                });
+                            });
+                        } else {
+                            this.db.run(`CREATE INDEX IF NOT EXISTS idx_knowledge_chat_key ON knowledge(chat_id, key)`, () => resolve());
+                        }
+                    }
                 });
             });
         });
@@ -129,32 +174,52 @@ export class MemoryManager {
 
     private async initVectorStore(): Promise<void> {
         try {
-            try {
-                const data = await fs.readFile(this.storagePath, "utf-8");
-                const serialized: SerializedVector[] = JSON.parse(data);
+            this.vectorStore = new MemoryVectorStore(this.embeddings);
 
-                this.vectorStore = new MemoryVectorStore(this.embeddings);
+            let serialized: SerializedVector[] = [];
 
-                if (serialized && Array.isArray(serialized)) {
-                    console.log(`[Memory] Loading ${serialized.length} semantic vectors from disk...`);
-                    const docs = serialized.map(item => ({
+            // If Turso is the active database, attempt loading cloud semantic_vectors first
+            if (this.db && this.db.getDriverName() === "turso") {
+                try {
+                    const rows = await this.db.all<any>(`SELECT id, chat_id, content, metadata, embedding FROM semantic_vectors`);
+                    if (rows && rows.length > 0) {
+                        console.log(`[Memory] Loading ${rows.length} semantic vectors from Turso cloud...`);
+                        serialized = rows.map(r => ({
+                            content: r.content,
+                            metadata: typeof r.metadata === "string" ? JSON.parse(r.metadata) : (r.metadata || {}),
+                            embedding: typeof r.embedding === "string" ? JSON.parse(r.embedding) : (r.embedding || [])
+                        }));
+                    }
+                } catch (e: any) {
+                    console.warn("[Memory] Could not load vectors from Turso cloud table:", e.message);
+                }
+            }
+
+            // Fallback to local disk file if Turso table was empty or driver is SQLite
+            if (serialized.length === 0) {
+                try {
+                    const data = await fs.readFile(this.storagePath, "utf-8");
+                    const fileVectors = JSON.parse(data);
+                    if (fileVectors && Array.isArray(fileVectors)) {
+                        console.log(`[Memory] Loading ${fileVectors.length} semantic vectors from disk...`);
+                        serialized = fileVectors;
+                    }
+                } catch (e) {
+                    console.log("[Memory] No existing semantic core found on disk. Starting fresh.");
+                }
+            }
+
+            if (serialized && Array.isArray(serialized) && serialized.length > 0) {
+                const validItems = serialized.filter(item => Array.isArray(item.embedding) && item.embedding.length === 3072);
+                if (validItems.length > 0) {
+                    const vectors = validItems.map(item => item.embedding);
+                    const docs = validItems.map(item => ({
                         pageContent: item.content,
                         metadata: item.metadata
                     }));
-                    const validItems = serialized.filter(item => Array.isArray(item.embedding) && item.embedding.length === 3072);
-                    if (validItems.length > 0) {
-                        const vectors = validItems.map(item => item.embedding);
-                        const docs = validItems.map(item => ({
-                            pageContent: item.content,
-                            metadata: item.metadata
-                        }));
-                        await this.vectorStore.addVectors(vectors, docs);
-                        console.log(`[Memory] Loaded ${validItems.length} verified 3072-dim vectors into memory.`);
-                    }
+                    await this.vectorStore.addVectors(vectors, docs);
+                    console.log(`[Memory] Loaded ${validItems.length} verified 3072-dim vectors into memory.`);
                 }
-            } catch (e) {
-                console.log("[Memory] No existing semantic core found. Starting fresh.");
-                this.vectorStore = new MemoryVectorStore(this.embeddings);
             }
             console.log("[Memory] 4-Layer Vector Store initialized.");
         } catch (error: any) {
@@ -165,12 +230,16 @@ export class MemoryManager {
 
     // --- FACT MANAGEMENT (DEDUPLICATION & CONFLICT RESOLUTION) ---
 
-    public async saveFact(category: string, key: string, value: string, confidence: number = 1.0): Promise<boolean> {
+    public async saveFact(category: string, key: string, value: string, confidence: number = 1.0, chatId: string = "default"): Promise<boolean> {
         await this.initialize().catch(() => { });
         const id = `fact_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
 
         const existing: KnowledgeFact | null = await new Promise((resolve) => {
-            this.db.get<KnowledgeFact>(`SELECT * FROM knowledge WHERE key = ?`, [key], (err, row) => resolve(row || null));
+            this.db.get<KnowledgeFact>(
+                `SELECT * FROM knowledge WHERE (chat_id = ? OR (chat_id = 'default' AND ? = 'default')) AND key = ?`,
+                [chatId, chatId, key],
+                (err, row) => resolve(row || null)
+            );
         });
 
         const nowIso = new Date().toISOString();
@@ -180,8 +249,8 @@ export class MemoryManager {
                 console.log(`[Memory] Fact deduplicated (identical value exists). Updating timestamp: [${category}] ${key}`);
                 return new Promise((resolve) => {
                     this.db.run(
-                        `UPDATE knowledge SET timestamp = ? WHERE key = ?`,
-                        [nowIso, key],
+                        `UPDATE knowledge SET timestamp = ? WHERE (chat_id = ? OR (chat_id = 'default' AND ? = 'default')) AND key = ?`,
+                        [nowIso, chatId, chatId, key],
                         (err) => resolve(!err)
                     );
                 });
@@ -189,8 +258,8 @@ export class MemoryManager {
             console.log(`[Memory] Fact updated (conflict resolved): [${category}] ${key}: "${existing.value}" -> "${value}"`);
             return new Promise((resolve) => {
                 this.db.run(
-                    `UPDATE knowledge SET value = ?, confidence = ?, timestamp = ? WHERE key = ?`,
-                    [value, confidence, nowIso, key],
+                    `UPDATE knowledge SET value = ?, confidence = ?, timestamp = ?, category = ? WHERE (chat_id = ? OR (chat_id = 'default' AND ? = 'default')) AND key = ?`,
+                    [value, confidence, nowIso, category, chatId, chatId, key],
                     (err) => resolve(!err)
                 );
             });
@@ -198,14 +267,14 @@ export class MemoryManager {
 
         return new Promise((resolve) => {
             this.db.run(
-                `INSERT INTO knowledge (id, category, key, value, confidence, timestamp) VALUES (?, ?, ?, ?, ?, ?)`,
-                [id, category, key, value, confidence, nowIso],
+                `INSERT INTO knowledge (id, chat_id, category, key, value, confidence, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                [id, chatId, category, key, value, confidence, nowIso],
                 (err) => {
                     if (err) {
                         console.error("[Memory] Save Fact Error:", err.message);
                         resolve(false);
                     } else {
-                        console.log(`[Memory] Saved Fact -> [${category}] ${key}: "${value}"`);
+                        console.log(`[Memory] Saved Fact -> [${chatId}][${category}] ${key}: "${value}"`);
                         resolve(true);
                     }
                 }
@@ -213,53 +282,61 @@ export class MemoryManager {
         });
     }
 
-    public async getAllFacts(): Promise<KnowledgeFact[]> {
+    public async getAllFacts(chatId: string = "default"): Promise<KnowledgeFact[]> {
         await this.initialize().catch(() => {});
         return new Promise((resolve) => {
-            this.db.all<KnowledgeFact>(`SELECT * FROM knowledge ORDER BY timestamp DESC, confidence DESC`, [], (err, rows) => {
-                if (err || !rows) {
-                    resolve([]);
-                } else {
-                    // Filter out any rows with missing required fields
-                    const validRows = (rows as any).filter((r: any) => r && r.key && r.value && r.category);
-                    resolve(validRows);
+            // Strict multi-user isolation: return user's facts + global system facts only; never leak legacy 'default' user data
+            const sql = chatId === "default"
+                ? `SELECT * FROM knowledge WHERE chat_id = 'default' ORDER BY timestamp DESC, confidence DESC`
+                : `SELECT * FROM knowledge WHERE chat_id = ? OR (chat_id = 'default' AND category = 'system') ORDER BY timestamp DESC, confidence DESC`;
+            const params = chatId === "default" ? [] : [chatId];
+            this.db.all<KnowledgeFact>(
+                sql,
+                params,
+                (err, rows) => {
+                    if (err || !rows) {
+                        resolve([]);
+                    } else {
+                        const validRows = (rows as any).filter((r: any) => r && r.key && r.value && r.category);
+                        resolve(validRows);
+                    }
                 }
-            });
+            );
         });
     }
 
-    private async extractFactsFromText(userInput: string): Promise<void> {
+    private async extractFactsFromText(userInput: string, chatId: string = "default"): Promise<void> {
         const text = userInput.trim();
 
-        const nameMatch = text.match(/(?:my name is|i am|call me)\s+([A-Z][a-zA-Z]+)/i);
-        if (nameMatch && nameMatch[1] && !["a", "the", "building", "working", "going"].includes(nameMatch[1].toLowerCase())) {
-            await this.saveFact("user_profile", "user_name", nameMatch[1].trim());
+        const nameMatch = text.match(/(?:remember\s+(?:that\s+)?my\s+name\s+is|my\s+name\s+is|call\s+me|i\s+am)\s+([A-Za-z0-9\s'-]+?)(?:\.|\!|,|\s+please|\s+remember|\s+save|\s+and|$)/i);
+        if (nameMatch && nameMatch[1] && !["a", "the", "building", "working", "going", "here", "ready"].includes(nameMatch[1].toLowerCase().trim())) {
+            await this.saveFact("user_profile", "user_name", nameMatch[1].trim(), 1.0, chatId);
         }
 
         const studentMatch = text.match(/(?:i am a|i am an|studying|student of)\s+([a-zA-Z\s]+?)\s+(?:student|degree|dept|department)/i);
         if (studentMatch && studentMatch[1]) {
-            await this.saveFact("user_profile", "student_type", studentMatch[1].trim());
+            await this.saveFact("user_profile", "student_type", studentMatch[1].trim(), 1.0, chatId);
         }
 
         const collegeMatch = text.match(/(?:at|from|in|study at|studying at)\s+([A-Za-z0-9\s]+?)\s+(?:college|university|institute|institution|school)/i);
         if (collegeMatch && collegeMatch[1]) {
             const collegeName = `${collegeMatch[1].trim()} College`;
-            await this.saveFact("user_profile", "college", collegeName);
+            await this.saveFact("user_profile", "college", collegeName, 1.0, chatId);
         }
 
         const yearMatch = text.match(/(final|1st|2nd|3rd|4th|first|second|third|fourth)\s+year/i);
         if (yearMatch) {
-            await this.saveFact("user_profile", "year", `${yearMatch[1].toLowerCase()} year`);
+            await this.saveFact("user_profile", "year", `${yearMatch[1].toLowerCase()} year`, 1.0, chatId);
         }
 
         const projectMatch = text.match(/(?:my project is|building|working on|developing)\s+([A-Za-z0-9\s\-_]+?)(?:\.|,|\s+as|\s+for|$)/i);
         if (projectMatch && projectMatch[1] && projectMatch[1].length > 3) {
-            await this.saveFact("project", "project_name", projectMatch[1].trim());
+            await this.saveFact("project", "project_name", projectMatch[1].trim(), 1.0, chatId);
         }
 
         const prefMatch = text.match(/(?:i prefer|i like|i love)\s+([A-Za-z0-9\s\-_]+?)(?:\.|,|$)/i);
         if (prefMatch && prefMatch[1]) {
-            await this.saveFact("preference", `pref_${Date.now()}`, prefMatch[1].trim());
+            await this.saveFact("preference", `pref_${Date.now()}`, prefMatch[1].trim(), 1.0, chatId);
         }
     }
 
@@ -287,25 +364,84 @@ export class MemoryManager {
 
     // --- MEMORY SEARCH ENGINE ---
 
-    public async searchMemory(query: string): Promise<string> {
+    public async searchMemory(query: string, chatId: string = "default"): Promise<string> {
         await this.initialize().catch(() => { });
         const results: string[] = [];
 
-        const facts = await this.getAllFacts();
-        const matchingFacts = facts.filter(f =>
-            f.key.toLowerCase().includes(query.toLowerCase()) ||
-            f.value.toLowerCase().includes(query.toLowerCase()) ||
-            f.category.toLowerCase().includes(query.toLowerCase())
-        );
+        const facts = await this.getAllFacts(chatId);
+        const lowerQ = query.toLowerCase().trim();
+        const isNameQuery = lowerQ === "user_name" || /\b(?:name|who am i|user_name)\b/i.test(lowerQ);
+
+        const stopWords = new Set([
+            "my", "the", "a", "an", "about", "did", "i", "save", "what", "is", "for", 
+            "please", "me", "and", "or", "tell", "show", "can", "you", "your",
+            "do", "have", "any", "know", "with", "which", "are", "in", "to"
+        ]);
+
+        const queryWords = lowerQ
+            .replace(/[^a-z0-9\s]/g, " ")
+            .split(/\s+/)
+            .filter(w => !stopWords.has(w) && w.length > 2);
+
+        // Expand common synonyms
+        const expandedQueryWords = new Set<string>(queryWords);
+        if (expandedQueryWords.has("database")) expandedQueryWords.add("db");
+        if (expandedQueryWords.has("db")) expandedQueryWords.add("database");
+        if (expandedQueryWords.has("languages")) expandedQueryWords.add("language");
+        if (expandedQueryWords.has("preferences")) expandedQueryWords.add("preference");
+
+        const matchingFacts = facts.filter(f => {
+            const keyLower = f.key.toLowerCase().replace(/_/g, " ");
+            const valLower = f.value.toLowerCase();
+            const catLower = f.category.toLowerCase();
+            const fullText = `${catLower} ${keyLower} ${valLower}`;
+
+            // Exact phrase match
+            if (fullText.includes(lowerQ)) return true;
+
+            // Token overlap match: matches if any distinctive keyword is in the fact
+            if (expandedQueryWords.size > 0) {
+                const matchedWords = Array.from(expandedQueryWords).filter(w => fullText.includes(w));
+                return matchedWords.length > 0;
+            }
+
+            return false;
+        });
+
+        // Sort matching facts by number of matching keywords descending
+        matchingFacts.sort((a, b) => {
+            const aText = `${a.category} ${a.key.replace(/_/g, " ")} ${a.value}`.toLowerCase();
+            const bText = `${b.category} ${b.key.replace(/_/g, " ")} ${b.value}`.toLowerCase();
+            const aMatches = Array.from(expandedQueryWords).filter(w => aText.includes(w)).length;
+            const bMatches = Array.from(expandedQueryWords).filter(w => bText.includes(w)).length;
+            return bMatches - aMatches;
+        });
+
+        if (isNameQuery) {
+            const nameFacts = facts.filter(f => f.key.toLowerCase().includes("name") || f.category === "user_profile");
+            for (const nf of nameFacts) {
+                if (!matchingFacts.some(existing => existing.id === nf.id)) {
+                    matchingFacts.push(nf);
+                }
+            }
+        }
 
         if (matchingFacts.length > 0) {
             results.push(`[USER_FACTS MATCHES]\n` + matchingFacts.map(f => `• [${f.category}] ${f.key}: ${f.value}`).join("\n"));
         }
 
         const interactions = await new Promise<any[]>((resolve) => {
-            this.db.all(`SELECT user_msg, agent_res FROM interactions WHERE user_msg LIKE ? OR agent_res LIKE ? LIMIT 5`, [`%${query}%`, `%${query}%`], (err, rows) => {
-                resolve(rows || []);
-            });
+            const sql = chatId === "default"
+                ? `SELECT user_msg, agent_res FROM interactions WHERE chat_id = 'default' AND (user_msg LIKE ? OR agent_res LIKE ?) LIMIT 5`
+                : `SELECT user_msg, agent_res FROM interactions WHERE chat_id = ? AND (user_msg LIKE ? OR agent_res LIKE ?) LIMIT 5`;
+            const params = chatId === "default" ? [`%${query}%`, `%${query}%`] : [chatId, `%${query}%`, `%${query}%`];
+            this.db.all(
+                sql,
+                params,
+                (err, rows) => {
+                    resolve(rows || []);
+                }
+            );
         });
 
         if (interactions.length > 0) {
@@ -323,8 +459,14 @@ export class MemoryManager {
                     timeoutPromise
                 ]).finally(() => clearTimeout(timer!));
 
-                if (vecDocs && vecDocs.length > 0) {
-                    results.push(`[SEMANTIC_MEMORY MATCHES]\n` + vecDocs.map(d => docToText(d)).join("\n---\n"));
+                const userVecDocs = vecDocs ? vecDocs.filter(d => {
+                    if (d.metadata?.isDoc || d.metadata?.type === "KNOWLEDGE") return true;
+                    if (chatId === "default") return !d.metadata?.chatId || d.metadata.chatId === "default";
+                    return d.metadata?.chatId === chatId;
+                }) : [];
+
+                if (userVecDocs && userVecDocs.length > 0) {
+                    results.push(`[SEMANTIC_MEMORY MATCHES]\n` + userVecDocs.map(d => docToText(d)).join("\n---\n"));
                 }
             } catch (e: any) {
                 console.log('[Memory] Vector search unavailable — using SQLite only.');
@@ -429,19 +571,23 @@ export class MemoryManager {
 
     // --- INTERACTION & CONTEXT ASSEMBLY ---
 
-    public async addInteraction(arg1: string, arg2: string, arg3: string = "default"): Promise<void> {
+        public async getRecentTurns(chatId: string = "default", limit: number = 10): Promise<{ user_msg: string; agent_res: string }[]> {
+        await this.initialize().catch(() => {});
+        return new Promise((resolve) => {
+            this.db.all(
+                `SELECT user_msg, agent_res FROM interactions WHERE chat_id = ? ORDER BY timestamp DESC LIMIT ?`,
+                [chatId, limit],
+                (err, rows: any[]) => {
+                    if (err || !rows) resolve([]);
+                    else resolve(rows.reverse());
+                }
+            );
+        });
+    }
+
+    public async addInteraction(userInput: string, agentResponse: string, chatId: string = "default"): Promise<void> {
         await this.initialize().catch(() => { });
         const id = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-
-        let userInput = arg1;
-        let agentResponse = arg2;
-        let chatId = arg3;
-
-        if ((/^\d+$/.test(arg1) || arg1 === "default") && arg2 && arg3 !== "default") {
-            chatId = arg1;
-            userInput = arg2;
-            agentResponse = arg3;
-        }
 
         return new Promise((resolve, reject) => {
             this.db.run(
@@ -474,7 +620,7 @@ export class MemoryManager {
                             }
                         }
 
-                        await this.extractFactsFromText(userInput);
+                        await this.extractFactsFromText(userInput, chatId);
                         await this.checkAndSummarizeOldInteractions();
 
                         // Background GraphRAG Relation Extraction (Non-blocking)
@@ -532,20 +678,12 @@ export class MemoryManager {
 
     // --- FAILURE ISOLATED CONTEXT ASSEMBLY ---
 
-    public async getContext(arg1: string, arg2: string = "default", parentSignal?: AbortSignal): Promise<string> {
+    public async getContext(userInput: string, chatId: string = "default", parentSignal?: AbortSignal): Promise<string> {
         try {
             await this.initialize().catch(() => { });
 
             if (parentSignal?.aborted) {
                 return "No previous context available (Flow Aborted).";
-            }
-
-            let userInput = arg1;
-            let chatId = arg2;
-
-            if ((/^\d+$/.test(arg1) || arg1 === "default") && arg2 && arg2 !== "default") {
-                chatId = arg1;
-                userInput = arg2;
             }
 
             const seedKeywords = Array.from(new Set(
@@ -562,7 +700,7 @@ export class MemoryManager {
             const [l1, l2, l3, l4, lKg] = await Promise.all([
                 this.executeLayerWithTimeout("Layer 1 (Recent History)", () => this.getRecentHistory(chatId), []),
                 this.executeLayerWithTimeout("Layer 2 (Vector Search)", () => this.getSemanticContext(userInput), ""),
-                this.executeLayerWithTimeout("Layer 3 (Knowledge Facts)", () => this.getAllFacts(), []),
+                this.executeLayerWithTimeout("Layer 3 (Knowledge Facts)", () => this.getAllFacts(chatId), []),
                 this.executeLayerWithTimeout("Layer 4 (Summaries)", () => this.getRelevantSummaries(), []),
                 this.executeLayerWithTimeout("GraphRAG", () => kg.traverseSubGraph(seedKeywords, 2), { seedEntities: [], visitedEntities: [], triples: [] })
             ]);
@@ -596,16 +734,16 @@ export class MemoryManager {
 
             const sections: string[] = [];
 
+            if (recentText.trim()) {
+                sections.push(`[CONVERSATION RECENT HISTORY (LAST 20)]\n${recentText.trim()}`);
+            }
+
             if (knowledgeText.trim()) {
                 sections.push(`[USER_FACTS & KNOWLEDGE BASE]\n${knowledgeText.trim()}`);
             }
 
             if (graphText && graphText.trim()) {
                 sections.push(`=== KNOWLEDGE GRAPH CONNECTIONS (GraphRAG) ===\n${graphText.trim()}`);
-            }
-
-            if (recentText.trim()) {
-                sections.push(`[CONVERSATION RECENT HISTORY (LAST 20)]\n${recentText.trim()}`);
             }
 
             if (summariesText.trim()) {
@@ -703,6 +841,35 @@ export class MemoryManager {
         };
     }
 
+    public async migrateLegacyDefaultUser(targetChatId: string): Promise<{ migratedFacts: number; migratedInteractions: number }> {
+        await this.initialize().catch(() => {});
+        if (!targetChatId || targetChatId === "default") {
+            throw new Error("Target chatId must be a valid non-default identifier.");
+        }
+
+        return new Promise((resolve, reject) => {
+            this.db.serialize(() => {
+                this.db.run(
+                    `UPDATE OR IGNORE knowledge SET chat_id = ? WHERE chat_id = 'default' AND category IN ('user_profile', 'user_memory', 'preference')`,
+                    [targetChatId],
+                    function (err) {
+                        if (err) return reject(err);
+                        const factsCount = this.changes;
+
+                        this.db.run(
+                            `UPDATE interactions SET chat_id = ? WHERE chat_id = 'default'`,
+                            [targetChatId],
+                            function (err2) {
+                                if (err2) return reject(err2);
+                                resolve({ migratedFacts: factsCount, migratedInteractions: this.changes });
+                            }
+                        );
+                    }
+                );
+            });
+        });
+    }
+
     private async saveVectorStore(): Promise<void> {
         if (!this.vectorStore) return;
         try {
@@ -711,7 +878,29 @@ export class MemoryManager {
                 metadata: v.metadata,
                 embedding: v.embedding
             }));
-            await fs.writeFile(this.storagePath, JSON.stringify(vectors, null, 2));
+
+            // If Turso cloud driver is active, persist to semantic_vectors table
+            if (this.db && this.db.getDriverName() === "turso") {
+                const stmts = vectors.map((v, idx) => ({
+                    sql: `INSERT OR REPLACE INTO semantic_vectors (id, chat_id, content, metadata, embedding) VALUES (?, ?, ?, ?, ?)`,
+                    params: [
+                        v.metadata?.id || `vec_${idx}_${Date.now()}`,
+                        v.metadata?.chatId || "default",
+                        v.content || "",
+                        JSON.stringify(v.metadata || {}),
+                        JSON.stringify(v.embedding || [])
+                    ]
+                }));
+                // Batch insert into Turso
+                for (let i = 0; i < stmts.length; i += 25) {
+                    await this.db.batch(stmts.slice(i, i + 25)).catch(e => {
+                        console.warn("[Memory] Warning persisting vectors to Turso:", e.message);
+                    });
+                }
+            }
+
+            // Also persist to local file for fast boot cache
+            await fs.writeFile(this.storagePath, JSON.stringify(vectors, null, 2)).catch(() => {});
         } catch (err: any) {
             console.error("[Memory] Failed to save semantic core:", err.message);
         }

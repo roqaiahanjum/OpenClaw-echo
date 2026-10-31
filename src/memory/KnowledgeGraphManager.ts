@@ -2,6 +2,7 @@
 import sqlite3 from "sqlite3";
 import * as dotenv from "dotenv";
 import { SQLITE_DB_PATH } from "../core/storage";
+import { DatabaseConnectionFactory, IDatabaseConnection } from "./dbAdapter";
 
 dotenv.config();
 
@@ -32,24 +33,21 @@ export interface SubGraphTraversal {
 
 export class KnowledgeGraphManager {
     private static instance: KnowledgeGraphManager;
-    private db: sqlite3.Database;
-    private isInitialized: boolean = false;
-
-    private constructor() {
-        this.db = new sqlite3.Database(SQLITE_DB_PATH, (err) => {
-            if (err) {
-                console.error("[Graph] SQLite Connection Error:", err.message);
-            } else {
-                console.log(`[Graph] SQLite Connected to Graph Storage (${SQLITE_DB_PATH}).`);
-            }
-        });
+    private get db(): IDatabaseConnection {
+        return DatabaseConnectionFactory.getConnection();
     }
+
+    private constructor() {}
 
     public static getInstance(): KnowledgeGraphManager {
         if (!KnowledgeGraphManager.instance) {
             KnowledgeGraphManager.instance = new KnowledgeGraphManager();
         }
         return KnowledgeGraphManager.instance;
+    }
+
+    public static resetInstance(): void {
+        (KnowledgeGraphManager as any).instance = undefined;
     }
 
     public async initialize(): Promise<void> {

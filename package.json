@@ -12,6 +12,7 @@
     "build:dashboard": "cd dashboard && npm install --include=dev && npm run build",
     "build:server": "tsc",
     "build": "npm run build:dashboard && npm run build:server",
+    "prestart": "node scripts/prestart_restore.js",
     "start": "node dist/index.js",
     "start:bg": "node dist/index.js >> logs/openclaw.log 2>&1",
     "start:dev": "node -r ts-node/register src/index.ts",

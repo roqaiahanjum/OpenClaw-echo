@@ -8,6 +8,8 @@ dashboard/dist/
 *.sqlite
 *.sqlite-journal
 *.db
+*.db*
+openclaw.db*
 npm-debug.log*
 .DS_Store
 *.log
@@ -22,4 +24,5 @@ src/src/sandbox/
 # Generated runtime memory & vector caches
 src/memory/semantic_core*.json
 src/src/memory/semantic_core*.json
-scratch/embedding_cache.json
+scratch/
+benchmark_results/

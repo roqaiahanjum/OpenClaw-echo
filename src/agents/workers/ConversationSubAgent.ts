@@ -24,12 +24,13 @@ export class ConversationSubAgent implements WorkerAgent {
                 throw new Error("Mandatory tool 'get_conversation_context' is not registered in SkillRegistry.");
             }
 
+            const chatId = task.contextPayload?.chatId ? String(task.contextPayload.chatId) : "default";
             const toolStart = Date.now();
             let rawToolOutput = "";
             let parsedContext: any = {};
 
             try {
-                rawToolOutput = String(await contextTool.invoke({ query: task.taskDescription }));
+                rawToolOutput = String(await contextTool.invoke({ query: task.taskDescription, chatId }));
                 parsedContext = JSON.parse(rawToolOutput);
             } catch (err: any) {
                 rawToolOutput = `Error executing get_conversation_context: ${err.message}`;
@@ -47,14 +48,21 @@ export class ConversationSubAgent implements WorkerAgent {
 
             try {
                 const systemPrompt = `You are OpenClaw Echo, a helpful autonomous multi-agent AI assistant.
-Answer the user's conversational greeting or query politely, concisely (max 2-3 sentences), and grounded in this verified local context.
+Answer the user's conversational greeting or query politely, concisely (max 2-3 sentences), grounded in this verified local context and conversation history.
+
 Context:
 - Timestamp: ${parsedContext.timestamp || new Date().toISOString()}
 - System Identity: ${parsedContext.system || "OpenClaw Echo"}
 - Memory Facts Count: ${parsedContext.matchedFactsCount ?? 0}
-${parsedContext.sampleFacts ? `- Known facts: ${parsedContext.sampleFacts.join("; ")}` : ""}
+${parsedContext.sampleFacts && parsedContext.sampleFacts.length > 0 ? `- Known user facts: ${parsedContext.sampleFacts.join("; ")}` : ""}
 
-Never claim you lack capabilities. Be brief, professional, and direct.`;
+${parsedContext.recentDialogue ? `=== Recent Conversation Dialogue History ===\n${parsedContext.recentDialogue}\n` : ""}
+${task.contextPayload?.context ? `=== Memory Context ===\n${task.contextPayload.context}\n` : ""}
+
+Guidelines:
+- If the user asks what they previously asked, refer directly to the Recent Conversation Dialogue History above.
+- Never state that the user hasn't asked anything if recent messages are present in the history.
+- Never claim you lack capabilities. Be brief, professional, and direct.`;
 
                 const messages = [
                     new SystemMessage(systemPrompt),

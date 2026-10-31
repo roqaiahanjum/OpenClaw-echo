@@ -25,6 +25,13 @@ export class PlannerSubAgent implements WorkerAgent {
 
             // Decompose into DAG tasks
             const subTasks = decomposeIntoACPTasks(task.taskDescription, planString);
+            const userChatId = task.contextPayload?.chatId ? String(task.contextPayload.chatId) : undefined;
+            if (userChatId) {
+                subTasks.forEach(st => {
+                    st.contextPayload = st.contextPayload || {};
+                    st.contextPayload.chatId = userChatId;
+                });
+            }
             DashboardLogger.log(`[PlannerSubAgent] Decomposed prompt into ${subTasks.length} sub-tasks: ${subTasks.map(t => `${t.targetAgent} (${t.taskId})`).join(", ")}`);
 
             // Execute sub-tasks with dependency resolution

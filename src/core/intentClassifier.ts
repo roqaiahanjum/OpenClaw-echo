@@ -60,9 +60,11 @@ export const EXPLICIT_RESEARCH_PATTERNS = [
 
 // 4. Explicit Memory Intent: User specifically asks to remember or recall saved facts
 export const EXPLICIT_MEMORY_PATTERNS = [
-    /\b(?:remember\s+(?:that|my|this)|store\s+(?:fact|knowledge|that)|save\s+(?:fact|knowledge|note))\b/i,
+    /\b(?:remember\s+(?:that|my|this)|store\s+(?:fact|knowledge|that)|save\s+(?:fact|knowledge|note)|memorize|keep\s+in\s+mind|note\s+down)\b/i,
     /\b(?:what\s+did\s+i\s+save|what\s+do\s+you\s+remember|recall|search\s+memory|saved\s+facts?|my\s+notes?)\b/i,
-    /\b(?:get\s+all\s+knowledge|memory\s+stats|what\s+is\s+in\s+memory|recall\s+fact)\b/i
+    /\b(?:get\s+all\s+knowledge|memory\s+stats|what\s+is\s+in\s+memory|recall\s+fact)\b/i,
+    /\b(?:what(?:'s|\s+is)\s+my\s+name|who\s+am\s+i|do\s+you\s+(?:know|remember)\s+my\s+name|tell\s+me\s+my\s+name|what\s+is\s+my\s+identity)\b/i,
+    /\b(?:my\s+name\s+is|call\s+me)\s+[A-Za-z0-9\s'-]+/i
 ];
 
 // 5. Simple Conversation & Pleasantries Patterns

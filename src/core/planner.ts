@@ -252,8 +252,6 @@ export function decomposeIntoACPTasks(userPrompt: string, parentId?: string): AC
         const urlMatch = userPrompt.match(/https?:\/\/[^\s]+/i);
         if (urlMatch) {
             browserUrl = urlMatch[0];
-        } else if (lower.includes("typescript")) {
-            browserUrl = "https://www.typescriptlang.org/docs/";
         }
 
         tasks.push({

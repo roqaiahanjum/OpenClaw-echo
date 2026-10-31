@@ -165,6 +165,9 @@ export function validateCodeSafety(code: string): CodeSafetyResult {
 
     // 1. Prohibited runtime modules and dangerous primitives
     const disallowedPatterns: { pattern: RegExp; name: string }[] = [
+        { pattern: /\b(?:import\s+subprocess|from\s+subprocess\s+import)\b/i, name: "subprocess" },
+        { pattern: /\b(?:os\.system|os\.popen|os\.spawn|os\.exec)\b/i, name: "os system/exec" },
+        { pattern: /\bexec\s*\(/i, name: "exec(" },
         { pattern: /\bfetch\s*\(/i, name: "fetch(" },
         { pattern: /\b(?:globalThis|window)\.fetch\b/i, name: "fetch" },
         { pattern: /\bXMLHttpRequest\b/i, name: "XMLHttpRequest" },
@@ -546,8 +549,8 @@ export const runSandboxCodeTool = tool(
                 return "Safety Violation: Symlink path escape detected.";
             }
 
-            if (!cleanFileName.endsWith(".js") && !cleanFileName.endsWith(".ts")) {
-                return "Safety Error: Only JavaScript (.js) and TypeScript (.ts) files can be executed in the sandbox.";
+            if (!cleanFileName.endsWith(".js") && !cleanFileName.endsWith(".ts") && !cleanFileName.endsWith(".py")) {
+                return "Safety Error: Only JavaScript (.js), TypeScript (.ts), and Python (.py) files can be executed in the sandbox.";
             }
 
             // 1. Validate code safety before execution (Patch 3)
@@ -560,7 +563,9 @@ export const runSandboxCodeTool = tool(
             console.log(`[Skill] Executing file in sandbox: ${cleanFileName}`);
             const cmd = cleanFileName.endsWith(".ts")
                 ? `npx ts-node "${targetPath}"`
-                : `node "${targetPath}"`;
+                : cleanFileName.endsWith(".py")
+                    ? `python "${targetPath}"`
+                    : `node "${targetPath}"`;
 
             // 2. Execute with isolated SANDBOX_ENV and 256KB maxBuffer (Patch 2)
             const { stdout, stderr } = await execAsync(cmd, {
@@ -754,9 +759,9 @@ export const ingestKnowledgeTool = tool(
 );
 
 export const saveKnowledgeTool = tool(
-    async ({ category, key, value, confidence }: { category: string, key: string, value: string, confidence?: number }) => {
+    async ({ category, key, value, confidence, chatId }: { category: string, key: string, value: string, confidence?: number, chatId?: string }) => {
         try {
-            const ok = await memory.saveFact(category, key, value, confidence || 1.0);
+            const ok = await memory.saveFact(category, key, value, confidence || 1.0, chatId || "default");
             return ok ? `Successfully saved knowledge fact: [${category}] ${key} = "${value}"` : "Failed to save fact.";
         } catch (error: any) {
             return `Error saving knowledge fact: ${error.message}`;
@@ -769,15 +774,16 @@ export const saveKnowledgeTool = tool(
             category: z.string().describe("Category (e.g. 'user_profile', 'project')"),
             key: z.string().describe("Unique key identifier"),
             value: z.string().describe("Value of fact"),
-            confidence: z.number().optional().describe("Confidence score")
+            confidence: z.number().optional().describe("Confidence score"),
+            chatId: z.string().optional().describe("User or chat ID for isolated memory storage")
         })
     }
 );
 
 export const getAllKnowledgeTool = tool(
-    async () => {
+    async ({ chatId }: { chatId?: string } = {}) => {
         try {
-            const facts = await memory.getAllFacts();
+            const facts = await memory.getAllFacts(chatId || "default");
             if (facts.length === 0) return "No knowledge facts stored.";
             return JSON.stringify(facts, null, 2);
         } catch (error: any) {
@@ -786,7 +792,10 @@ export const getAllKnowledgeTool = tool(
     },
     {
         name: "get_all_knowledge",
-        description: "Retrieves all stored facts from Layer 3 Knowledge Base."
+        description: "Retrieves all stored facts from Layer 3 Knowledge Base.",
+        schema: z.object({
+            chatId: z.string().optional().describe("Optional user or chat ID for scoped knowledge retrieval")
+        })
     }
 );
 
@@ -825,9 +834,9 @@ export const ingestToLongTermMemoryTool = tool(
 );
 
 export const searchMemoryTool = tool(
-    async ({ query }: { query: string }) => {
+    async ({ query, chatId }: { query: string, chatId?: string }) => {
         try {
-            return await memory.searchMemory(query);
+            return await memory.searchMemory(query, chatId || "default");
         } catch (error: any) {
             return `Error searching memory: ${error.message}`;
         }
@@ -836,7 +845,8 @@ export const searchMemoryTool = tool(
         name: "search_memory",
         description: "Searches long-term memory across facts, history, and vectors.",
         schema: z.object({
-            query: z.string().describe("Search query string")
+            query: z.string().describe("Search query string"),
+            chatId: z.string().optional().describe("Optional user or chat ID for scoped memory search")
         })
     }
 );
@@ -1390,14 +1400,16 @@ export const manageGitRepositoryTool = tool(
  * and relevant conversational facts without calling expensive external APIs or web search.
  */
 export const conversationContextTool = tool(
-    async ({ query, topic }: { query?: string; topic?: string }) => {
+    async ({ query, topic, chatId }: { query?: string; topic?: string; chatId?: string }) => {
         const now = new Date();
         const persona = "Autonomous Multi-Agent AI Framework (OpenClaw Echo)";
         let matchedFacts: any[] = [];
+        let recentTurns: any[] = [];
         try {
             const { MemoryManager } = await import("../memory/manager");
             const memoryInstance = MemoryManager.getInstance();
-            matchedFacts = await memoryInstance.getAllFacts();
+            matchedFacts = await memoryInstance.getAllFacts(chatId || "default");
+            recentTurns = await memoryInstance.getRecentTurns(chatId || "default", 10);
         } catch (_) {}
 
         return JSON.stringify({
@@ -1405,16 +1417,19 @@ export const conversationContextTool = tool(
             timestamp: now.toISOString(),
             system: persona,
             matchedFactsCount: matchedFacts.length,
-            sampleFacts: matchedFacts.slice(0, 3).map(f => `${f.key}: ${f.value}`),
+            sampleFacts: matchedFacts.slice(0, 5).map(f => `${f.key}: ${f.value}`),
+            recentDialogueCount: recentTurns.length,
+            recentDialogue: recentTurns.map(t => `User: ${t.user_msg}\nAgent: ${t.agent_res}`).join("\n\n"),
             note: "Local conversation context retrieved successfully. Use to formulate helpful, polite, and grounded conversational responses."
         });
     },
     {
         name: "get_conversation_context",
-        description: "Retrieves local conversation persona, system time, active tools, and local memory facts for grounded conversational responses.",
+        description: "Retrieves local conversation persona, system time, active tools, local memory facts, and recent conversation turns for grounded conversational responses.",
         schema: z.object({
             query: z.string().optional().describe("User conversational greeting or query"),
-            topic: z.string().optional().describe("Optional conversation topic focus")
+            topic: z.string().optional().describe("Optional conversation topic focus"),
+            chatId: z.string().optional().describe("Optional user or chat ID for scoped context retrieval")
         })
     }
 );

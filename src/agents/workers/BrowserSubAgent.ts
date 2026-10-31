@@ -30,15 +30,17 @@ export class BrowserSubAgent implements WorkerAgent {
                 }
             }
 
+            // Strict requirement: Never invent or substitute a default URL if the user did not specify one
             if (!targetUrl) {
-                const lower = (task.taskDescription + " " + (task.contextPayload?.originalPrompt || "")).toLowerCase();
-                if (lower.includes("typescript")) {
-                    targetUrl = "https://www.typescriptlang.org/docs/";
-                } else if (lower.includes("python")) {
-                    targetUrl = "https://docs.python.org/3/";
-                } else if (lower.includes("node")) {
-                    targetUrl = "https://nodejs.org/en/docs";
-                }
+                const executionTimeMs = Date.now() - startTime;
+                return {
+                    taskId: task.taskId,
+                    targetAgent: this.agentType,
+                    status: "FAILED",
+                    resultData: "⚠️ [BrowserSubAgent Failed]: No URL provided. Please supply a valid HTTP/HTTPS URL to browse or inspect.",
+                    error: "No URL provided in task description or context.",
+                    executionTimeMs
+                };
             }
 
             if (!targetUrl) {

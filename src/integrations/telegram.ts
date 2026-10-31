@@ -23,6 +23,7 @@ import { isSimpleConversation } from "../core/conversationGuard";
 import { ToolSelector } from "../core/toolSelector";
 import { AuthManager } from "../core/auth";
 import { classifyUserIntent } from "../core/intentClassifier";
+import { WebhookTracker } from "./webhookTracker";
 
 import { telemetry } from "./telemetry";
 
@@ -261,6 +262,7 @@ export const executeAutonomousFlow = async (input: string, chatId?: string | num
         }
 
         // 1. MULTI-AGENT / PLANNER PIPELINE
+        const userChatId = chatId ? String(chatId) : undefined;
         if (!isPhoto && (intentDecision.intent === "MULTI_AGENT" || intentDecision.primaryAgent === "planner")) {
             if (progressFn) await progressFn("🤖 _Planning & orchestrating multi-agent execution with dependency resolution..._").catch(() => {});
             const plannerTask: ACPTask = {
@@ -268,7 +270,7 @@ export const executeAutonomousFlow = async (input: string, chatId?: string | num
                 parentId: `root_${Date.now()}`,
                 targetAgent: "planner",
                 taskDescription: input,
-                contextPayload: { originalPrompt: input },
+                contextPayload: { originalPrompt: input, chatId: userChatId },
                 maxDepth: 3,
                 dependsOn: []
             };
@@ -296,7 +298,7 @@ export const executeAutonomousFlow = async (input: string, chatId?: string | num
                 parentId: `root_${Date.now()}`,
                 targetAgent: "coding",
                 taskDescription: input,
-                contextPayload: { originalPrompt: input, fileName },
+                contextPayload: { originalPrompt: input, fileName, chatId: userChatId },
                 maxDepth: 1,
                 dependsOn: []
             };
@@ -322,7 +324,7 @@ export const executeAutonomousFlow = async (input: string, chatId?: string | num
                 parentId: `root_${Date.now()}`,
                 targetAgent: "research",
                 taskDescription: input,
-                contextPayload: { originalPrompt: input },
+                contextPayload: { originalPrompt: input, chatId: userChatId },
                 maxDepth: 1,
                 dependsOn: []
             };
@@ -348,7 +350,7 @@ export const executeAutonomousFlow = async (input: string, chatId?: string | num
                 parentId: `root_${Date.now()}`,
                 targetAgent: "browser",
                 taskDescription: input,
-                contextPayload: { originalPrompt: input },
+                contextPayload: { originalPrompt: input, chatId: userChatId },
                 maxDepth: 1,
                 dependsOn: []
             };
@@ -374,7 +376,7 @@ export const executeAutonomousFlow = async (input: string, chatId?: string | num
                 parentId: `root_${Date.now()}`,
                 targetAgent: "memory",
                 taskDescription: input,
-                contextPayload: { originalPrompt: input },
+                contextPayload: { originalPrompt: input, chatId: userChatId || "default", context },
                 maxDepth: 1,
                 dependsOn: []
             };
@@ -400,7 +402,7 @@ export const executeAutonomousFlow = async (input: string, chatId?: string | num
                 parentId: `root_${Date.now()}`,
                 targetAgent: "conversation",
                 taskDescription: input,
-                contextPayload: { originalPrompt: input, context },
+                contextPayload: { originalPrompt: input, chatId: chatId?.toString() || "default", context },
                 maxDepth: 1,
                 dependsOn: []
             };
@@ -871,9 +873,10 @@ async function telegramHandler(ctx: Context) {
         };
 
         console.log(`[DIAG:${requestId}] 4. agent invocation started`);
+        const callerId = ctx.chat?.id != null ? String(ctx.chat.id) : (ctx.from?.id != null ? String(ctx.from.id) : undefined);
         const flowPromise = executeAutonomousFlow(
             input,
-            String(ctx.chat?.id),
+            callerId,
             isPhoto,
             replyHandler,
             photoLink,
@@ -1090,7 +1093,7 @@ bot.command("memory", async (ctx) => {
 
 bot.command("facts", async (ctx) => {
     try {
-        const facts = await memory.getAllFacts();
+        const facts = await memory.getAllFacts(String(ctx.chat?.id));
         if (!facts || facts.length === 0) {
             await ctx.reply("ℹ️ No knowledge facts stored yet.");
             return;
@@ -1143,7 +1146,7 @@ bot.command("searchmemory", async (ctx) => {
             await ctx.reply("Usage: /searchmemory <query>");
             return;
         }
-        const result = await memory.searchMemory(query);
+        const result = await memory.searchMemory(query, String(ctx.chat?.id));
         await ctx.reply(`🔍 *Memory Search Results for "${query}"*\n\n${result}`);
     } catch (e: any) {
         await ctx.reply("❌ Error searching memory.");
@@ -1406,17 +1409,74 @@ app.post("/api/test-drive", async (req: Request, res: Response) => {
     res.json({ status: "initiated", challenge: simulatedChallenge });
 });
 
+const webhookTracker = WebhookTracker.getInstance();
+
 app.post(WEBHOOK_PATH, async (req: Request, res: Response) => {
-    try {
-        await bot.handleUpdate(req.body, res);
-    } catch (err) {
-        res.status(500).send("Error");
+    const updateId = req.body?.update_id;
+    const chatId = req.body?.message?.chat?.id || req.body?.callback_query?.message?.chat?.id || "default";
+
+    if (updateId != null) {
+        // Durably register update in database (Turso / SQLite) before proceeding
+        const registration = await webhookTracker.registerIncomingUpdate(updateId, String(chatId), req.body);
+        if (registration.action === "SKIP") {
+            return res.status(200).send(`OK (${registration.reason})`);
+        }
+        if (registration.action === "ERROR") {
+            console.error(`[TelegramWebhook] Durable registration failed for update ${updateId}: ${registration.error}. Returning HTTP 500 for Telegram retry.`);
+            return res.status(500).send("Update persistence failed; requesting retry");
+        }
+    }
+
+    // Process update with timeout race to protect Telegram webhook SLA
+    const processPromise = (async () => {
+        try {
+            await bot.handleUpdate(req.body);
+            if (updateId != null) {
+                await webhookTracker.markCompleted(updateId);
+            }
+        } catch (err: any) {
+            console.error(`[TelegramWebhook] Asynchronous error processing update ${updateId}:`, err?.message || err);
+            if (updateId != null) {
+                await webhookTracker.markFailed(updateId, err?.message || String(err));
+            }
+        }
+    })();
+
+    // Acknowledge within 3500ms or when processing completes
+    const timeoutPromise = new Promise(resolve => setTimeout(resolve, 3500));
+    await Promise.race([processPromise, timeoutPromise]);
+
+    if (!res.headersSent) {
+        res.status(200).send("OK");
     }
 });
 
 app.use((err: any, req: Request, res: Response, next: any) => {
     console.error("[Server Error]", err.stack);
     res.status(500).json({ error: "Internal Server Error", details: err.message });
+});
+
+app.get("/healthz", (req: Request, res: Response) => {
+    res.status(200).json({ status: "alive", timestamp: new Date().toISOString() });
+});
+
+app.get("/readyz", async (req: Request, res: Response) => {
+    try {
+        const memoryOk = await memory.checkHealth().then(h => h.sqlite.status === "connected").catch(() => false);
+        const routerOk = await router.checkHealth().then(h => h.gemini?.status === "healthy" || h.groq?.status === "healthy").catch(() => false);
+        if (memoryOk) {
+            res.status(200).json({
+                status: "ready",
+                database: "connected",
+                router: routerOk ? "connected" : "degraded",
+                timestamp: new Date().toISOString()
+            });
+        } else {
+            res.status(503).json({ status: "not_ready", database: "disconnected" });
+        }
+    } catch (e: any) {
+        res.status(503).json({ status: "error", error: e.message });
+    }
 });
 
 app.get("/health", (req: Request, res: Response) => {
@@ -1478,6 +1538,10 @@ export const startServer = async (initialPort?: number) => {
                     try {
                         await bot.telegram.setWebhook(fullWebhookUrl, { drop_pending_updates: false });
                         DashboardLogger.log(`✅ Webhook registered: ${fullWebhookUrl}`);
+                        // Run durable recovery sweep in background for any updates left incomplete before crash/restart
+                        webhookTracker.recoverPendingUpdates(bot).catch(e => {
+                            console.warn("[Telegram] Webhook recovery sweep error:", e.message);
+                        });
                     } catch (err: any) {
                         console.error("[Telegram] Webhook setup failed:", err.message);
                     }

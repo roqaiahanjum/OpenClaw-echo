@@ -27,7 +27,10 @@ export class ResearchSubAgent implements WorkerAgent {
             if (webSearchTool) {
                 try {
                     webResults = String(await webSearchTool.invoke({ query: searchQuery }));
-                    toolSuccess = !webResults.toLowerCase().includes("fatal") && webResults.length > 30;
+                    const isErrorSnippet = webResults.includes("Warning: TAVILY_API_KEY") || 
+                                           webResults.includes("Web search error:") || 
+                                           webResults.includes("is not configured");
+                    toolSuccess = !isErrorSnippet && !webResults.toLowerCase().includes("fatal") && webResults.length > 50;
                 } catch (e: any) {
                     webResults = `Web search error: ${e.message}`;
                     toolSuccess = false;
@@ -96,7 +99,7 @@ Provide a clear, structured research summary in 3-4 concise bullet points with c
                 toolOutput: webResults,
                 verified: toolSuccess,
                 verificationReason: toolSuccess ? "Web search results gathered and synthesized" : "Web search API unavailable or returned empty result",
-                resultData: toolSuccess ? `### Research Synthesis\n\n${synthesis.trim()}` : `⚠️ [ResearchSubAgent Partial]: ${webResults}`,
+                resultData: toolSuccess ? `### Research Synthesis\n\n${synthesis.trim()}` : `⚠️ [ResearchSubAgent Tool Unavailable]: Live web search could not be executed because search API is unconfigured or unreachable. Tool output: ${webResults}`,
                 error: toolSuccess ? undefined : webResults,
                 executionTimeMs
             };
