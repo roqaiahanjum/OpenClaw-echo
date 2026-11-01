@@ -57,10 +57,11 @@ Context:
 ${parsedContext.sampleFacts && parsedContext.sampleFacts.length > 0 ? `- Known user facts: ${parsedContext.sampleFacts.join("; ")}` : ""}
 
 ${parsedContext.recentDialogue ? `=== Recent Conversation Dialogue History ===\n${parsedContext.recentDialogue}\n` : ""}
+${parsedContext.recentQuestions ? `=== Recent Questions Asked by User ===\n${parsedContext.recentQuestions}\n` : ""}
 ${task.contextPayload?.context ? `=== Memory Context ===\n${task.contextPayload.context}\n` : ""}
 
 Guidelines:
-- If the user asks what they previously asked, refer directly to the Recent Conversation Dialogue History above.
+- If the user asks what they previously asked or questions about previous context, refer directly to the Recent Questions and Recent Conversation Dialogue History above.
 - Never state that the user hasn't asked anything if recent messages are present in the history.
 - Never claim you lack capabilities. Be brief, professional, and direct.`;
 

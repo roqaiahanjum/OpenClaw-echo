@@ -280,7 +280,7 @@ export const executeAutonomousFlow = async (input: string, chatId?: string | num
 
             if (parentSignal?.aborted) throw new Error("FLOW_ABORTED");
             await safeReply(finalResponse);
-            memory.addInteraction(input, finalResponse, chatId?.toString() || "default")
+            await memory.addInteraction(input, finalResponse, chatId?.toString() || "default")
                 .catch(err => console.warn("[Memory] Background interaction persistence warning:", err.message));
             Telemetry.broadcast("status_update", { event: "flow_complete" });
             return;
@@ -310,7 +310,7 @@ export const executeAutonomousFlow = async (input: string, chatId?: string | num
 
             if (parentSignal?.aborted) throw new Error("FLOW_ABORTED");
             await safeReply(finalResponse);
-            memory.addInteraction(input, finalResponse, chatId?.toString() || "default")
+            await memory.addInteraction(input, finalResponse, chatId?.toString() || "default")
                 .catch(err => console.warn("[Memory] Background interaction persistence warning:", err.message));
             Telemetry.broadcast("status_update", { event: "flow_complete" });
             return;
@@ -336,7 +336,7 @@ export const executeAutonomousFlow = async (input: string, chatId?: string | num
 
             if (parentSignal?.aborted) throw new Error("FLOW_ABORTED");
             await safeReply(finalResponse);
-            memory.addInteraction(input, finalResponse, chatId?.toString() || "default")
+            await memory.addInteraction(input, finalResponse, chatId?.toString() || "default")
                 .catch(err => console.warn("[Memory] Background interaction persistence warning:", err.message));
             Telemetry.broadcast("status_update", { event: "flow_complete" });
             return;
@@ -362,7 +362,7 @@ export const executeAutonomousFlow = async (input: string, chatId?: string | num
 
             if (parentSignal?.aborted) throw new Error("FLOW_ABORTED");
             await safeReply(finalResponse);
-            memory.addInteraction(input, finalResponse, chatId?.toString() || "default")
+            await memory.addInteraction(input, finalResponse, chatId?.toString() || "default")
                 .catch(err => console.warn("[Memory] Background interaction persistence warning:", err.message));
             Telemetry.broadcast("status_update", { event: "flow_complete" });
             return;
@@ -388,7 +388,7 @@ export const executeAutonomousFlow = async (input: string, chatId?: string | num
 
             if (parentSignal?.aborted) throw new Error("FLOW_ABORTED");
             await safeReply(finalResponse);
-            memory.addInteraction(input, finalResponse, chatId?.toString() || "default")
+            await memory.addInteraction(input, finalResponse, chatId?.toString() || "default")
                 .catch(err => console.warn("[Memory] Background interaction persistence warning:", err.message));
             Telemetry.broadcast("status_update", { event: "flow_complete" });
             return;
@@ -414,7 +414,7 @@ export const executeAutonomousFlow = async (input: string, chatId?: string | num
 
             if (parentSignal?.aborted) throw new Error("FLOW_ABORTED");
             await safeReply(finalResponse);
-            memory.addInteraction(input, finalResponse, chatId?.toString() || "default")
+            await memory.addInteraction(input, finalResponse, chatId?.toString() || "default")
                 .catch(err => console.warn("[Memory] Background interaction persistence warning:", err.message));
             Telemetry.broadcast("status_update", { event: "flow_complete" });
             return;
@@ -627,7 +627,7 @@ Context: ${context}`;
         await safeReply(finalResponse);
 
         DashboardLogger.log(`[Flow] Step 6: Persisting interaction across 4 memory layers...`);
-        memory.addInteraction(input, finalResponse, chatId?.toString() || 'default')
+        await memory.addInteraction(input, finalResponse, chatId?.toString() || 'default')
             .catch(err => console.warn("[Memory] Background interaction persistence warning:", err.message));
 
         Telemetry.broadcast("status_update", { event: "flow_complete" });
@@ -695,7 +695,20 @@ export function splitMessage(text: string, maxLength: number = 4000): string[] {
     return chunks;
 }
 
-async function telegramHandler(ctx: Context) {
+const chatExecutionQueues = new Map<string, Promise<void>>();
+
+async function enqueueChatProcessing(chatId: string, fn: () => Promise<void>): Promise<void> {
+    const prev = chatExecutionQueues.get(chatId) || Promise.resolve();
+    const current = prev.then(fn, fn).finally(() => {
+        if (chatExecutionQueues.get(chatId) === current) {
+            chatExecutionQueues.delete(chatId);
+        }
+    });
+    chatExecutionQueues.set(chatId, current);
+    return current;
+}
+
+async function processTelegramMessage(ctx: Context) {
     if (!ctx.message) return;
 
     const updateId = ctx.update?.update_id ?? "unknown";
@@ -910,6 +923,14 @@ async function telegramHandler(ctx: Context) {
     } finally {
         clearInterval(typingInterval);
     }
+}
+
+async function telegramHandler(ctx: Context) {
+    if (!ctx.message) return;
+    const callerId = ctx.chat?.id != null ? String(ctx.chat.id) : (ctx.from?.id != null ? String(ctx.from.id) : "default");
+    return enqueueChatProcessing(callerId, async () => {
+        await processTelegramMessage(ctx);
+    });
 }
 
 

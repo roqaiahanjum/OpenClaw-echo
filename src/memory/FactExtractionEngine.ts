@@ -126,17 +126,33 @@ export class FactExtractionEngine {
         }
 
         // 4. User Profile: College / University
-        const collegeMatch = statement.match(/(?:i\s+study\s+at|my\s+(?:college|university|institute)\s+is|at|from)\s+([A-Za-z0-9\s]+?)\s+(college|university|institute|institution)/i);
-        if (collegeMatch && collegeMatch[1]) {
-            const colName = `${collegeMatch[1].trim()} ${collegeMatch[2].charAt(0).toUpperCase() + collegeMatch[2].slice(1).toLowerCase()}`;
+        const collegeMatchWithSuffix = statement.match(/(?:i\s+study\s+at|my\s+(?:college|university|institute)\s+is|at|from)\s+([A-Za-z0-9\s]+?)\s+(college|university|institute|institution)/i);
+        if (collegeMatchWithSuffix && collegeMatchWithSuffix[1]) {
+            const colName = `${collegeMatchWithSuffix[1].trim()} ${collegeMatchWithSuffix[2].charAt(0).toUpperCase() + collegeMatchWithSuffix[2].slice(1).toLowerCase()}`;
             return {
                 category: "user_profile",
                 key: "college",
                 value: colName,
                 confidence: 1.0,
                 rawStatement: input,
-                aliases: ["university", "school", "institution"]
+                aliases: ["university", "school", "institution", "college_name"]
             };
+        }
+
+        const collegeDirectMatch = statement.match(/^(?:i\s+(?:study\s+at|attend|go\s+to)|my\s+(?:college|university|institute|school)\s+is)\s+([A-Za-z0-9\s.'-]+)$/i);
+        if (collegeDirectMatch && collegeDirectMatch[1]) {
+            const candidate = collegeDirectMatch[1].trim();
+            const lowerCand = candidate.toLowerCase();
+            if (!lowerCand.startsWith("home") && !lowerCand.startsWith("night") && candidate.length > 1) {
+                return {
+                    category: "user_profile",
+                    key: "college",
+                    value: candidate,
+                    confidence: 1.0,
+                    rawStatement: input,
+                    aliases: ["university", "school", "institution", "college_name"]
+                };
+            }
         }
 
         // 5. User Profile: Student Type / Major

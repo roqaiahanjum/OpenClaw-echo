@@ -1059,19 +1059,22 @@ export const runSystemAuditTool = tool(
 
             // 1. Real DB reachability check
             let dbOk = false;
+            let dbDriver = "DATABASE";
             let dbStatus = "ONLINE & ACCESSIBLE";
             let dbFailDetail = "";
             try {
-                const sqlite3 = require("sqlite3").verbose();
-                const testDb = new sqlite3.Database(dbPath, sqlite3.OPEN_READWRITE);
-                await new Promise<void>((resolve, reject) => {
-                    testDb.get("SELECT 1", (err: any) => {
-                        testDb.close();
-                        if (err) reject(err);
-                        else resolve();
-                    });
-                });
-                dbOk = true;
+                const { DatabaseConnectionFactory } = await import("../memory/dbAdapter");
+                const conn = DatabaseConnectionFactory.getConnection();
+                dbDriver = conn.getDriverName().toUpperCase();
+                const health = await conn.checkHealth();
+                if (health.status === "connected") {
+                    dbOk = true;
+                    dbStatus = `ONLINE & ACCESSIBLE (${dbDriver})`;
+                } else {
+                    dbOk = false;
+                    dbFailDetail = health.details;
+                    dbStatus = `FAILED: ${dbFailDetail}`;
+                }
             } catch (dbErr: any) {
                 dbOk = false;
                 dbFailDetail = dbErr.message || String(dbErr);
@@ -1118,7 +1121,7 @@ export const runSystemAuditTool = tool(
             }
 
             const checkResults = [
-                { name: "Database (SQLite openclaw.db)", ok: dbOk, detail: dbFailDetail },
+                { name: `Database (${dbDriver})`, ok: dbOk, detail: dbFailDetail },
                 { name: "Sandbox Directory (src/sandbox)", ok: sandboxOk, detail: sandboxFailDetail },
                 { name: "Upstream AI Router", ok: routerOk, detail: routerFailDetail }
             ];
@@ -1137,7 +1140,7 @@ export const runSystemAuditTool = tool(
             console.log(`[StructuredLog] [Event:ToolResult] [Tool:run_system_audit] [DurationMs:${durationMs}] [Status:${allChecksPassed ? "Success" : "Degraded"}]`);
 
             return `System Environment Audit Report:\n` +
-                `• Database (SQLite openclaw.db): ${dbStatus}\n` +
+                `• Database (${dbDriver}): ${dbStatus}\n` +
                 `• Sandbox Directory (src/sandbox): ${sandboxStatus}\n` +
                 `• Upstream AI Router: ${routerStatus}\n` +
                 `• Node.js Environment: ${process.version} (${process.platform} ${process.arch})\n` +

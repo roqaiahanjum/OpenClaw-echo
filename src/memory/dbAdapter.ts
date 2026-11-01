@@ -253,9 +253,10 @@ export class TursoDatabaseAdapter implements IDatabaseConnection {
 
         const p = this.all<T>(sql, actualParams).then(rows => rows.length > 0 ? rows[0] : null);
         if (actualCb) {
-            p.then(r => actualCb!(null, r), e => actualCb!(e, null));
-            return p;
+            p.then(r => actualCb!(null, r)).catch(e => actualCb!(e, null));
+            return p.catch(() => null);
         }
+        p.catch(() => {});
         return p;
     }
 
@@ -316,9 +317,12 @@ export class TursoDatabaseAdapter implements IDatabaseConnection {
         })();
 
         if (actualCb) {
-            executePromise.then(r => actualCb!(null, r), e => actualCb!(e, [])).catch(() => {});
-            return executePromise;
+            executePromise
+                .then(r => actualCb!(null, r))
+                .catch(e => actualCb!(e, []));
+            return executePromise.catch(() => [] as T[]);
         }
+        executePromise.catch(() => {});
         return executePromise;
     }
 
@@ -357,12 +361,12 @@ export class TursoDatabaseAdapter implements IDatabaseConnection {
         })();
 
         if (actualCb) {
-            executePromise.then(
-                res => actualCb!.call(res, null, res),
-                err => actualCb!(err)
-            ).catch(() => {});
-            return executePromise;
+            executePromise
+                .then(res => actualCb!.call(res, null, res))
+                .catch(err => actualCb!(err));
+            return executePromise.catch(() => ({ changes: 0 }));
         }
+        executePromise.catch(() => {});
         return executePromise;
     }
 
@@ -417,7 +421,8 @@ export class TursoDatabaseAdapter implements IDatabaseConnection {
     public async checkHealth(): Promise<{ status: "connected" | "error"; details: string; driver: string }> {
         try {
             await this.get("SELECT 1 as alive");
-            return { status: "connected", details: `Turso Cloud connected (${this.url})`, driver: "turso" };
+            const safeUrl = this.url.split("?")[0].replace(/\/\/.*@/, "//***@");
+            return { status: "connected", details: `Turso Cloud connected (${safeUrl})`, driver: "turso" };
         } catch (err: any) {
             return { status: "error", details: `Turso Cloud error: ${err.message}`, driver: "turso" };
         }
@@ -443,8 +448,8 @@ export class DatabaseConnectionFactory {
                 }
                 console.log("[DatabaseFactory] Initializing Turso Cloud Database Adapter...");
                 DatabaseConnectionFactory.instance = new TursoDatabaseAdapter(tursoUrl, tursoToken);
-            } else if (!driver && tursoUrl) {
-                console.log("[DatabaseFactory] Initializing Turso Cloud Database Adapter (inferred from TURSO_DATABASE_URL)...");
+            } else if (!driver && tursoUrl && process.env.NODE_ENV === "production") {
+                console.log("[DatabaseFactory] Initializing Turso Cloud Database Adapter (inferred from TURSO_DATABASE_URL in production)...");
                 DatabaseConnectionFactory.instance = new TursoDatabaseAdapter(tursoUrl, tursoToken);
             } else {
                 console.log("[DatabaseFactory] Initializing Local SQLite Adapter (Default)...");
