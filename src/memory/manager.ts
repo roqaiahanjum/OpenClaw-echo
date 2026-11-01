@@ -51,11 +51,16 @@ export class MemoryManager {
     private isInitialized: boolean = false;
     private embeddingCache = new Map<string, number[]>();
 
+    private customDb?: IDatabaseConnection;
+
     private get db(): IDatabaseConnection {
-        return DatabaseConnectionFactory.getConnection();
+        return this.customDb || DatabaseConnectionFactory.getConnection();
     }
 
-    private constructor() {
+    private constructor(customDb?: IDatabaseConnection) {
+        if (customDb) {
+            this.customDb = customDb;
+        }
         const apiKey = 
             process.env.GOOGLE_API_KEY || 
             process.env.GEMINI_API_KEY || 
@@ -96,7 +101,7 @@ export class MemoryManager {
                         agent_res TEXT,
                         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
                     )
-                `);
+                `, (err) => { if (err) reject(err); });
 
                 this.db.all(`PRAGMA table_info(interactions)`, (err, rows: any[]) => {
                     const hasChatId = (rows || []).some((r: any) => r.name === 'chat_id');
@@ -113,7 +118,7 @@ export class MemoryManager {
                         summary_text TEXT,
                         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
                     )
-                `);
+                `, (err) => { if (err) reject(err); });
 
                 // Ensure knowledge table supports per-user isolation with composite uniqueness on (chat_id, key)
                 this.db.all(`SELECT sql FROM sqlite_master WHERE type='table' AND name='knowledge'`, (err, rows: any[]) => {
@@ -342,7 +347,21 @@ export class MemoryManager {
         return { success: true, action: "created", key: fact.key, value: fact.value, category: fact.category };
     }
 
-    public async saveFact(category: string, key: string, value: string, confidence: number = 1.0, chatId: string = "default"): Promise<boolean> {
+    public async saveFact(
+        category: string,
+        key: string,
+        value: string,
+        confidenceOrChatId: number | string = 1.0,
+        chatId: string = "default"
+    ): Promise<boolean> {
+        let confidence = 1.0;
+        let actualChatId = chatId;
+        if (typeof confidenceOrChatId === "string") {
+            actualChatId = confidenceOrChatId;
+        } else if (typeof confidenceOrChatId === "number") {
+            confidence = confidenceOrChatId;
+        }
+
         const fact: ExtractedFact = {
             category: (category as any) || "user_memory",
             key: FactExtractionEngine.toCleanSnakeCase(key, 32),
@@ -351,7 +370,7 @@ export class MemoryManager {
             rawStatement: `${key}: ${value}`,
             aliases: [key, FactExtractionEngine.toCleanSnakeCase(key, 32)]
         };
-        const res = await this.saveStructuredFact(fact, chatId);
+        const res = await this.saveStructuredFact(fact, actualChatId);
         return res.success;
     }
 
@@ -414,17 +433,33 @@ export class MemoryManager {
 
     // --- CONVERSATION HISTORY & QUESTION CLASSIFICATION ---
 
+    public normalizeUserText(text: string): string {
+        if (!text) return "";
+        return text
+            .normalize("NFKC")
+            .trim()
+            .replace(/^[\s"'`“”‘’«»„(\[{<]+/, "")
+            .replace(/[\s"'`“”‘’«»„)\]}>,;:.]+$/, "")
+            .trim();
+    }
+
     public isQuestion(text: string): boolean {
         if (!text) return false;
-        const trimmed = text.trim();
+        const trimmed = this.normalizeUserText(text);
         if (trimmed.endsWith("?")) return true;
         const lower = trimmed.toLowerCase();
         return /^(?:what|why|how|who|whom|whose|when|where|which|is|are|was|were|do|does|did|can|could|would|should|will|have|has|had|tell me|explain|can you|could you)\b/i.test(lower);
     }
 
+    public isHistoryMetaQuestion(text: string): boolean {
+        if (!text) return false;
+        const lower = this.normalizeUserText(text).toLowerCase();
+        return /\b(?:(?:last|previous|recent|earlier)\s+(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)?\s*questions?|what\s+(?:was|were)\s+(?:my|the)\s+(?:last|previous|recent|earlier)\s+(?:\d+|one|two|three|four|five)?\s*questions?|what\s+did\s+i\s+(?:last\s+|just\s+|previously\s+)?ask|which\s+questions?\s+did\s+i\s+ask)\b/i.test(lower);
+    }
+
     public classifyMessageIntent(text: string): "QUESTION" | "STATEMENT" | "COMMAND" | "CONVERSATION" {
         if (!text) return "CONVERSATION";
-        const trimmed = text.trim();
+        const trimmed = this.normalizeUserText(text);
         const lower = trimmed.toLowerCase();
 
         // Conversational pleasantries (including greeting questions like "hello there, how are you?")
@@ -455,14 +490,15 @@ export class MemoryManager {
 
     public async getRecentQuestions(
         chatId: string = "default",
-        limit: number = 5
+        limit: number = 5,
+        excludeId?: string
     ): Promise<Array<{ id: string; question: string; answer: string; timestamp: string }>> {
         await this.initialize().catch(() => {});
         return new Promise((resolve) => {
-            const sql = `SELECT id, user_msg, agent_res, timestamp FROM interactions WHERE chat_id = ? ORDER BY timestamp DESC LIMIT 60`;
+            const sql = `SELECT id, user_msg, agent_res, timestamp FROM interactions WHERE chat_id = ? ORDER BY timestamp DESC, id DESC, rowid DESC LIMIT 200`;
             this.db.all(sql, [chatId], (err, rows: any[]) => {
                 if (err || !rows) return resolve([]);
-                const questions = rows.filter(r => r && r.user_msg && this.isQuestion(r.user_msg));
+                const questions = rows.filter(r => r && r.user_msg && r.id !== excludeId && this.isQuestion(r.user_msg) && !this.isHistoryMetaQuestion(r.user_msg));
                 const slice = questions.slice(0, limit);
                 // Return in chronological order (oldest to newest)
                 resolve(slice.reverse().map(r => ({
@@ -481,7 +517,7 @@ export class MemoryManager {
     ): Promise<Array<{ id: string; message: string; response: string; timestamp: string }>> {
         await this.initialize().catch(() => {});
         return new Promise((resolve) => {
-            const sql = `SELECT id, user_msg, agent_res, timestamp FROM interactions WHERE chat_id = ? ORDER BY timestamp DESC LIMIT ?`;
+            const sql = `SELECT id, user_msg, agent_res, timestamp FROM interactions WHERE chat_id = ? ORDER BY timestamp DESC, id DESC, rowid DESC LIMIT ?`;
             this.db.all(sql, [chatId, limit], (err, rows: any[]) => {
                 if (err || !rows) return resolve([]);
                 // Return in chronological order (oldest to newest)
@@ -525,12 +561,26 @@ export class MemoryManager {
         const lowerQ = query.toLowerCase().trim();
 
         // 1. Check for History Retrieval Queries (Last N Questions or Last N Messages)
-        const isQuestionHistory = /\b(?:(?:last|previous|recent)\s+(\d+)?\s*questions?|what\s+(?:was|were)\s+my\s+last\s+question|what\s+did\s+i\s+(?:last\s+)?ask)\b/i.test(lowerQ);
-        const isMessageHistory = !isQuestionHistory && /\b(?:(?:last|previous|recent)\s+(\d+)?\s*(?:messages?|chats?|turns?|texts?)|what\s+did\s+i\s+(?:just\s+)?say|conversation\s+history)\b/i.test(lowerQ);
+        const isQuestionHistory = /\b(?:(?:last|previous|recent|earlier)\s+(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)?\s*questions?|what\s+(?:was|were)\s+(?:my|the)\s+(?:last|previous|recent|earlier)\s+(?:\d+|one|two|three|four|five)?\s*questions?|what\s+did\s+i\s+(?:last\s+|just\s+|previously\s+)?ask|which\s+questions?\s+did\s+i\s+ask)\b/i.test(lowerQ);
+        const isMessageHistory = !isQuestionHistory && /\b(?:(?:last|previous|recent|earlier)\s+(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)?\s*(?:messages?|chats?|turns?|texts?)|what\s+did\s+i\s+(?:just\s+)?say|conversation\s+history)\b/i.test(lowerQ);
 
         if (isQuestionHistory) {
-            const limitMatch = lowerQ.match(/\b(?:last|previous|recent)\s+(\d+)\s*questions?\b/i);
-            const limit = limitMatch ? parseInt(limitMatch[1], 10) : 5;
+            let limit = 1;
+            const digitMatch = lowerQ.match(/\b(?:last|previous|recent|earlier)\s+(\d+)\b/i);
+            if (digitMatch) {
+                limit = parseInt(digitMatch[1], 10);
+            } else {
+                const wordMap: Record<string, number> = {
+                    one: 1, two: 2, three: 3, four: 4, five: 5,
+                    six: 6, seven: 7, eight: 8, nine: 9, ten: 10
+                };
+                const wordMatch = lowerQ.match(/\b(?:last|previous|recent|earlier)\s+(one|two|three|four|five|six|seven|eight|nine|ten)\b/i);
+                if (wordMatch) {
+                    limit = wordMap[wordMatch[1].toLowerCase()] || 2;
+                } else if (/\b(?:questions|recent\s+questions)\b/i.test(lowerQ) && !/\b(?:last\s+question|previous\s+question)\b/i.test(lowerQ)) {
+                    limit = 5;
+                }
+            }
             const questions = await this.getRecentQuestions(chatId, limit);
             if (questions.length === 0) {
                 return `No previous questions found in conversation history for this chat.`;
@@ -540,8 +590,22 @@ export class MemoryManager {
         }
 
         if (isMessageHistory) {
-            const limitMatch = lowerQ.match(/\b(?:last|previous|recent)\s+(\d+)\s*(?:messages?|chats?|turns?|texts?)\b/i);
-            const limit = limitMatch ? parseInt(limitMatch[1], 10) : 5;
+            let limit = 5;
+            const digitMatch = lowerQ.match(/\b(?:last|previous|recent|earlier)\s+(\d+)\b/i);
+            if (digitMatch) {
+                limit = parseInt(digitMatch[1], 10);
+            } else {
+                const wordMap: Record<string, number> = {
+                    one: 1, two: 2, three: 3, four: 4, five: 5,
+                    six: 6, seven: 7, eight: 8, nine: 9, ten: 10
+                };
+                const wordMatch = lowerQ.match(/\b(?:last|previous|recent|earlier)\s+(one|two|three|four|five|six|seven|eight|nine|ten)\b/i);
+                if (wordMatch) {
+                    limit = wordMap[wordMatch[1].toLowerCase()] || 2;
+                } else if (/\b(?:last\s+message|previous\s+message)\b/i.test(lowerQ)) {
+                    limit = 1;
+                }
+            }
             const msgs = await this.getRecentMessages(chatId, limit);
             if (msgs.length === 0) {
                 return `No recent messages found in conversation history for this chat.`;
@@ -575,7 +639,9 @@ export class MemoryManager {
             ["language", "lang", "programming language", "code"],
             ["database", "db", "storage", "datastore"],
             ["platform", "host", "hosting", "deployment", "server", "cloud"],
-            ["college", "university", "institute", "school", "campus"],
+            ["college", "university", "institute", "school", "campus", "study", "studying", "student", "education", "degree", "attending", "attend"],
+            ["work", "working", "job", "company", "employer", "office", "career", "profession", "occupation"],
+            ["live", "living", "reside", "residing", "location", "city", "hometown", "home", "address", "country", "place"],
             ["year", "academic year", "class"]
         ];
 
@@ -787,7 +853,7 @@ export class MemoryManager {
         await this.initialize().catch(() => {});
         return new Promise((resolve) => {
             this.db.all(
-                `SELECT user_msg, agent_res FROM interactions WHERE chat_id = ? ORDER BY timestamp DESC LIMIT ?`,
+                `SELECT user_msg, agent_res FROM interactions WHERE chat_id = ? ORDER BY timestamp DESC, id DESC, rowid DESC LIMIT ?`,
                 [chatId, limit],
                 (err, rows: any[]) => {
                     if (err || !rows) resolve([]);

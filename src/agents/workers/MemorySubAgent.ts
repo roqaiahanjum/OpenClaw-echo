@@ -28,12 +28,13 @@ export class MemorySubAgent implements WorkerAgent {
 
             // 1. Identify Read vs Write Operations
             const isNameQuery = /\b(?:what(?:'s|\s+is)\s+my\s+name|who\s+am\s+i|do\s+you\s+(?:know|remember)\s+my\s+name|tell\s+me\s+my\s+name|what\s+is\s+my\s+identity)\b/i.test(lower);
-            const isQuestionHistory = /\b(?:(?:last|previous|recent)\s+(\d+)?\s*questions?|what\s+(?:was|were)\s+my\s+last\s+question|what\s+did\s+i\s+(?:last\s+)?ask)\b/i.test(lower);
-            const isMessageHistory = !isQuestionHistory && /\b(?:(?:last|previous|recent)\s+(\d+)?\s*(?:messages?|chats?|turns?|texts?)|what\s+did\s+i\s+(?:just\s+)?say|conversation\s+history)\b/i.test(lower);
+            const isQuestionHistory = /\b(?:(?:last|previous|recent|earlier)\s+(?:\d+|one|two|three|four|five)?\s*questions?|what\s+(?:was|were)\s+(?:my|the)\s+(?:last|previous|recent)\s+(?:\d+|one|two|three|four|five)?\s*questions?|what\s+did\s+i\s+(?:last|just|previously)\s*(?:ask|inquire)|which\s+question\s+did\s+i\s+ask)\b/i.test(lower);
+            const isMessageHistory = !isQuestionHistory && /\b(?:(?:last|previous|recent|earlier)\s+(?:\d+|one|two|three|four|five)?\s*(?:messages?|chats?|turns?|texts?)|what\s+did\s+i\s+(?:just\s+)?say|conversation\s+history)\b/i.test(lower);
 
             const isReadQuery = isNameQuery || isQuestionHistory || isMessageHistory ||
                 /\b(?:what\s+did\s+i\s+save|what\s+do\s+you\s+remember|what\s+have\s+i\s+saved|what\s+is\s+saved|search|recall|find|list\s+knowledge|all\s+facts|memory\s+stats|how\s+many\s+facts)\b/i.test(lower) ||
-                lower.startsWith("what") || lower.startsWith("which") || lower.startsWith("search") || lower.startsWith("recall") || lower.startsWith("find");
+                /^(?:what|which|where|who|when|how|do\s+you|can\s+you|tell\s+me|search|recall|find)\b/i.test(lower) ||
+                lower.endsWith("?");
 
             const hasRememberDirective = /\b(?:remember|save|store|memorize|keep\s+in\s+mind|note\s+down)\b/i.test(lower);
             const isFactStatement = !isReadQuery && /^(?:my\s+[a-z0-9_\-\s]+?\s+is|i\s+am|i\s+study|i\s+work|i\s+prefer|our\s+[a-z0-9_\-\s]+?\s+is)\b/i.test(lower);
@@ -55,13 +56,39 @@ export class MemorySubAgent implements WorkerAgent {
                 };
             } else if (isQuestionHistory) {
                 toolName = "get_conversation_history";
-                const limitMatch = lower.match(/\b(?:last|previous|recent)\s+(\d+)\s*questions?\b/i);
-                const limit = limitMatch ? parseInt(limitMatch[1], 10) : 5;
+                let limit = 1; // Default to 1 for singular "last question"
+                const digitMatch = lower.match(/\b(?:last|previous|recent|earlier)\s+(\d+)\s*questions?\b/i);
+                if (digitMatch) {
+                    limit = parseInt(digitMatch[1], 10);
+                } else {
+                    const wordMap: Record<string, number> = {
+                        one: 1, two: 2, three: 3, four: 4, five: 5,
+                        six: 6, seven: 7, eight: 8, nine: 9, ten: 10
+                    };
+                    const wordMatch = lower.match(/\b(?:last|previous|recent|earlier)\s+(one|two|three|four|five|six|seven|eight|nine|ten)\s*questions?\b/i);
+                    if (wordMatch) {
+                        limit = wordMap[wordMatch[1].toLowerCase()] || 2;
+                    } else if (/\b(?:questions|recent\s+questions)\b/i.test(lower) && !/\b(?:last\s+question|previous\s+question)\b/i.test(lower)) {
+                        limit = 5;
+                    }
+                }
                 toolArgs = { chatId, filter: "questions_only", limit };
             } else if (isMessageHistory) {
                 toolName = "get_conversation_history";
-                const limitMatch = lower.match(/\b(?:last|previous|recent)\s+(\d+)\s*(?:messages?|chats?|turns?|texts?)\b/i);
-                const limit = limitMatch ? parseInt(limitMatch[1], 10) : 5;
+                let limit = 5;
+                const digitMatch = lower.match(/\b(?:last|previous|recent|earlier)\s+(\d+)\s*(?:messages?|chats?|turns?|texts?)\b/i);
+                if (digitMatch) {
+                    limit = parseInt(digitMatch[1], 10);
+                } else {
+                    const wordMap: Record<string, number> = {
+                        one: 1, two: 2, three: 3, four: 4, five: 5,
+                        six: 6, seven: 7, eight: 8, nine: 9, ten: 10
+                    };
+                    const wordMatch = lower.match(/\b(?:last|previous|recent|earlier)\s+(one|two|three|four|five|six|seven|eight|nine|ten)\s*(?:messages?|chats?|turns?|texts?)\b/i);
+                    if (wordMatch) {
+                        limit = wordMap[wordMatch[1].toLowerCase()] || 2;
+                    }
+                }
                 toolArgs = { chatId, filter: "all_messages", limit };
             } else if (lower.includes("all facts") || lower.includes("what do you know") || lower.includes("list knowledge")) {
                 toolName = "get_all_knowledge";

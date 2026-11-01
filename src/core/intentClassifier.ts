@@ -52,7 +52,7 @@ export const EXPLICIT_BROWSER_PATTERNS = [
 
 // 3. Explicit Research Intent: User specifically asks to research or investigate a topic
 export const EXPLICIT_RESEARCH_PATTERNS = [
-    /\b(?:research|investigate|study|overview of|literature on|survey of)\b/i,
+    /\b(?:research(?:\s+(?:on|into|about|the|[a-zA-Z0-9_\-]+))|conduct\s+research|investigate|literature\s+on|survey\s+of|overview\s+of|scientific\s+study|clinical\s+study|case\s+study)\b/i,
     /\b(?:what\s+are\s+the\s+latest|latest\s+advancements|latest\s+news|recent\s+developments)\b/i,
     /\b(?:find\s+information|look\s+up|search\s+for|search\s+latest)\b/i,
     /\b(?:history\s+of|benefits\s+of|architecture\s+of|comparison\s+of)\b/i
@@ -65,9 +65,15 @@ export const EXPLICIT_MEMORY_PATTERNS = [
     /\b(?:get\s+all\s+knowledge|memory\s+stats|what\s+is\s+in\s+memory|recall\s+fact)\b/i,
     /\b(?:what(?:'s|\s+is)\s+my\s+name|who\s+am\s+i|do\s+you\s+(?:know|remember)\s+my\s+name|tell\s+me\s+my\s+name|what\s+is\s+my\s+identity)\b/i,
     /\b(?:my\s+name\s+is|call\s+me)\s+[A-Za-z0-9\s'-]+/i,
-    /\b(?:last|previous|recent)\s+(\d+)?\s*(?:questions?|messages?|chats?|turns?|queries)\b/i,
-    /\b(?:what\s+(?:was|were)\s+my\s+last\s+(?:question|message)|what\s+did\s+i\s+(?:last\s+)?ask|what\s+did\s+i\s+(?:just\s+)?say|conversation\s+history)\b/i,
-    /\b(?:what\s+is\s+my\s+(?:sample\s+|demo\s+|test\s+|side\s+)?project|what\s+is\s+my\s+favorite|what\s+is\s+my\s+favourite|what\s+is\s+my\s+email|what\s+is\s+my\s+college)\b/i
+    // Generalized history queries (numeric or word limits)
+    /\b(?:last|previous|recent|earlier)\s+(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)?\s*(?:questions?|messages?|chats?|turns?|queries|inquiries)\b/i,
+    /\b(?:what\s+(?:was|were)\s+(?:my|the)\s+(?:last|previous|recent)\s+(?:\d+|one|two|three|four|five)?\s*(?:question|questions|message|messages)|what\s+did\s+i\s+(?:last|just|previously)\s*(?:ask|say)|which\s+question\s+did\s+i\s+ask|conversation\s+history)\b/i,
+    // Inquiries about user facts, state, identity, location, background
+    /\b(?:where|what|which|who|when|how)\s+(?:is|was|are|were|do|did|am|have)\s+(?:my|i)\b/i,
+    // Questions about personal attributes or possessions (e.g. "which college am I attending", "what project am I building")
+    /\b(?:which|what)\s+[a-z0-9_\-\s]+?\s+(?:am\s+i|do\s+i|did\s+i|i\s+am|i\s+study|i\s+work|i\s+live|i\s+attend)\b/i,
+    // Recall queries with personal scope
+    /\b(?:do\s+you\s+(?:remember|know|recall)|can\s+you\s+(?:remember|recall))\s+(?:what|where|which|who|when|how|my|about\s+my|the\s+name\s+of\s+my)\b/i
 ];
 
 // 5. Simple Conversation & Pleasantries Patterns
