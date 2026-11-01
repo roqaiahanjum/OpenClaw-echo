@@ -24,6 +24,7 @@ import { ToolSelector } from "../core/toolSelector";
 import { AuthManager } from "../core/auth";
 import { classifyUserIntent } from "../core/intentClassifier";
 import { WebhookTracker } from "./webhookTracker";
+import { telemetry } from "./telemetry";
 
 console.log(`[PID:${process.pid}] Bot initialization`);
 let updateCounter = 0;
@@ -1237,13 +1238,13 @@ app.get("/telemetry", async (req: Request, res: Response) => {
 });
 
 app.get("/api/telemetry/stream", (req: Request, res: Response) => {
-    Telemetry.subscribe(res);
+    telemetry.handleSSEStream(req, res);
 });
 
 app.get("/api/stats", async (req: Request, res: Response) => {
     try {
         const memStats = await memory.getStats();
-        const execStats = {}; // Telemetry.getExecutionStats() not available
+        const execStats = telemetry.getExecutionStats();
         const routerHealth = await router.checkHealth();
         res.json({
             memory: memStats,
