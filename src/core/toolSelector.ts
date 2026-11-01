@@ -39,8 +39,8 @@ const TOOL_DOMAINS: Record<string, { toolNames: string[]; keywords: RegExp }> = 
         keywords: /\b(git|commits?|branch(?:es)?|repos?|repository|git\s+status|git\s+diff|git\s+log|staging|checkout)\b/i
     },
     memory: {
-        toolNames: ["save_knowledge", "get_all_knowledge", "search_memory", "get_memory_stats", "update_user_profile"],
-        keywords: /\b(memory|remember|recall|fact|facts|saved facts?|store fact|user profile|preference|preferences|my name is|forget|what do you know|knowledge)\b/i
+        toolNames: ["save_knowledge", "get_all_knowledge", "search_memory", "get_conversation_history", "get_memory_stats", "update_user_profile"],
+        keywords: /\b(memory|remember|recall|fact|facts|saved facts?|store fact|user profile|preference|preferences|my name is|forget|what do you know|knowledge|last questions?|last messages?|conversation history)\b/i
     },
     clockwork: {
         toolNames: ["manage_scheduled_tasks"],

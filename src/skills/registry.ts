@@ -22,6 +22,7 @@ import {
     getMemoryStatsTool,
     ingestToLongTermMemoryTool,
     searchMemoryTool,
+    getConversationHistoryTool,
     conversationContextTool
 } from "./tools";
 
@@ -54,6 +55,7 @@ export class SkillRegistry {
         getMemoryStatsTool,
         ingestToLongTermMemoryTool,
         searchMemoryTool,
+        getConversationHistoryTool,
         conversationContextTool
     ];
 

@@ -2,12 +2,13 @@ import { ACPTask, ACPResult, WorkerAgent } from "../types";
 import { SkillRegistry } from "../../skills/registry";
 import { ModelRouter } from "../../core/router";
 import { SystemMessage, HumanMessage } from "@langchain/core/messages";
+import { FactExtractionEngine } from "../../memory/FactExtractionEngine";
 
 /**
  * MemorySubAgent
  *
  * Dedicated subagent for persistent memory storage, retrieval, and knowledge recall.
- * Uses real SQLite and semantic memory tools. Never fabricates memories.
+ * Uses real SQLite/Turso and semantic memory tools. Never fabricates memories.
  * Strictly respects multi-user isolation via chatId.
  */
 export class MemorySubAgent implements WorkerAgent {
@@ -27,42 +28,41 @@ export class MemorySubAgent implements WorkerAgent {
 
             // 1. Identify Read vs Write Operations
             const isNameQuery = /\b(?:what(?:'s|\s+is)\s+my\s+name|who\s+am\s+i|do\s+you\s+(?:know|remember)\s+my\s+name|tell\s+me\s+my\s+name|what\s+is\s+my\s+identity)\b/i.test(lower);
-            const isReadQuery = isNameQuery ||
+            const isQuestionHistory = /\b(?:(?:last|previous|recent)\s+(\d+)?\s*questions?|what\s+(?:was|were)\s+my\s+last\s+question|what\s+did\s+i\s+(?:last\s+)?ask)\b/i.test(lower);
+            const isMessageHistory = !isQuestionHistory && /\b(?:(?:last|previous|recent)\s+(\d+)?\s*(?:messages?|chats?|turns?|texts?)|what\s+did\s+i\s+(?:just\s+)?say|conversation\s+history)\b/i.test(lower);
+
+            const isReadQuery = isNameQuery || isQuestionHistory || isMessageHistory ||
                 /\b(?:what\s+did\s+i\s+save|what\s+do\s+you\s+remember|what\s+have\s+i\s+saved|what\s+is\s+saved|search|recall|find|list\s+knowledge|all\s+facts|memory\s+stats|how\s+many\s+facts)\b/i.test(lower) ||
                 lower.startsWith("what") || lower.startsWith("which") || lower.startsWith("search") || lower.startsWith("recall") || lower.startsWith("find");
 
-            const nameMatch = task.taskDescription.match(
-                /(?:remember\s+(?:that\s+)?my\s+name\s+is|my\s+name\s+is|call\s+me|i\s+am)\s+([A-Za-z0-9\s'-]+?)(?:\.|\!|,|\s+please|\s+remember|\s+save|\s+and|$)/i
-            );
             const hasRememberDirective = /\b(?:remember|save|store|memorize|keep\s+in\s+mind|note\s+down)\b/i.test(lower);
+            const isFactStatement = !isReadQuery && /^(?:my\s+[a-z0-9_\-\s]+?\s+is|i\s+am|i\s+study|i\s+work|i\s+prefer|our\s+[a-z0-9_\-\s]+?\s+is)\b/i.test(lower);
 
-            if (!isReadQuery && (hasRememberDirective || nameMatch || lower.includes("remember") || lower.includes("save") || lower.includes("store"))) {
+            if (!isReadQuery && (hasRememberDirective || isFactStatement || lower.includes("remember") || lower.includes("save") || lower.includes("store"))) {
                 isWriteOperation = true;
                 toolName = "save_knowledge";
 
-                let category = "user_memory";
-                let key = "custom_fact";
-                let value = task.taskDescription;
-
-                if (nameMatch && nameMatch[1] && !["a", "the", "building", "working", "going", "here", "ready"].includes(nameMatch[1].toLowerCase().trim())) {
-                    category = "user_profile";
-                    key = "user_name";
-                    value = nameMatch[1].trim();
-                } else {
-                    const matchThat = task.taskDescription.match(/(?:remember|store|save|memorize)\s+(?:that\s+)?(?:my\s+)?(.+)/i);
-                    if (matchThat && matchThat[1]) {
-                        value = matchThat[1].trim();
-                        key = value.slice(0, 30).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "custom_fact";
-                    }
-                }
+                // Extract structured fact with canonical key using FactExtractionEngine
+                const engine = FactExtractionEngine.getInstance();
+                const extracted = await engine.extractFact(task.taskDescription);
 
                 toolArgs = {
-                    category,
-                    key,
-                    value,
-                    confidence: 1.0,
+                    category: extracted.category,
+                    key: extracted.key,
+                    value: extracted.value,
+                    confidence: extracted.confidence,
                     chatId
                 };
+            } else if (isQuestionHistory) {
+                toolName = "get_conversation_history";
+                const limitMatch = lower.match(/\b(?:last|previous|recent)\s+(\d+)\s*questions?\b/i);
+                const limit = limitMatch ? parseInt(limitMatch[1], 10) : 5;
+                toolArgs = { chatId, filter: "questions_only", limit };
+            } else if (isMessageHistory) {
+                toolName = "get_conversation_history";
+                const limitMatch = lower.match(/\b(?:last|previous|recent)\s+(\d+)\s*(?:messages?|chats?|turns?|texts?)\b/i);
+                const limit = limitMatch ? parseInt(limitMatch[1], 10) : 5;
+                toolArgs = { chatId, filter: "all_messages", limit };
             } else if (lower.includes("all facts") || lower.includes("what do you know") || lower.includes("list knowledge")) {
                 toolName = "get_all_knowledge";
                 toolArgs = { chatId };

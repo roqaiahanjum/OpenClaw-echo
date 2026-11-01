@@ -12,6 +12,7 @@ import { extractAndStoreTriples } from "./graphExtractor";
 import { DashboardLogger } from "../core/logger";
 import { SQLITE_DB_PATH, SEMANTIC_CORE_PATH, ensureStorageDirectories } from "../core/storage";
 import { DatabaseConnectionFactory, IDatabaseConnection } from "./dbAdapter";
+import { FactExtractionEngine, ExtractedFact } from "./FactExtractionEngine";
 
 // Load .env with absolute path — works from any working directory
 dotenv.config({ 
@@ -228,58 +229,130 @@ export class MemoryManager {
         }
     }
 
-    // --- FACT MANAGEMENT (DEDUPLICATION & CONFLICT RESOLUTION) ---
+    // --- FACT MANAGEMENT (STRUCTURED EXTRACTION, DEDUPLICATION & CONFLICT RESOLUTION) ---
 
-    public async saveFact(category: string, key: string, value: string, confidence: number = 1.0, chatId: string = "default"): Promise<boolean> {
+    public async saveStructuredFact(
+        fact: ExtractedFact,
+        chatId: string = "default"
+    ): Promise<{ success: boolean; action: "created" | "updated" | "deduplicated"; key: string; value: string; category: string }> {
         await this.initialize().catch(() => { });
-        const id = `fact_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
-
-        const existing: KnowledgeFact | null = await new Promise((resolve) => {
-            this.db.get<KnowledgeFact>(
-                `SELECT * FROM knowledge WHERE (chat_id = ? OR (chat_id = 'default' AND ? = 'default')) AND key = ?`,
-                [chatId, chatId, key],
-                (err, row) => resolve(row || null)
-            );
-        });
-
         const nowIso = new Date().toISOString();
 
-        if (existing) {
-            if (existing.value.trim().toLowerCase() === value.trim().toLowerCase()) {
-                console.log(`[Memory] Fact deduplicated (identical value exists). Updating timestamp: [${category}] ${key}`);
-                return new Promise((resolve) => {
-                    this.db.run(
-                        `UPDATE knowledge SET timestamp = ? WHERE (chat_id = ? OR (chat_id = 'default' AND ? = 'default')) AND key = ?`,
-                        [nowIso, chatId, chatId, key],
-                        (err) => resolve(!err)
-                    );
-                });
-            }
-            console.log(`[Memory] Fact updated (conflict resolved): [${category}] ${key}: "${existing.value}" -> "${value}"`);
-            return new Promise((resolve) => {
-                this.db.run(
-                    `UPDATE knowledge SET value = ?, confidence = ?, timestamp = ?, category = ? WHERE (chat_id = ? OR (chat_id = 'default' AND ? = 'default')) AND key = ?`,
-                    [value, confidence, nowIso, category, chatId, chatId, key],
-                    (err) => resolve(!err)
-                );
+        // 1. Search for existing fact by canonical key or any known legacy aliases
+        const candidates = Array.from(new Set([fact.key, ...(fact.aliases || [])]));
+        const placeholders = candidates.map(() => "?").join(", ");
+
+        let existing: KnowledgeFact | null = null;
+        try {
+            existing = await new Promise<KnowledgeFact | null>((resolve) => {
+                const sql = chatId === "default"
+                    ? `SELECT * FROM knowledge WHERE chat_id = 'default' AND key IN (${placeholders}) LIMIT 1`
+                    : `SELECT * FROM knowledge WHERE (chat_id = ? OR (chat_id = 'default' AND ? = 'default')) AND key IN (${placeholders}) LIMIT 1`;
+                const params = chatId === "default" ? candidates : [chatId, chatId, ...candidates];
+                this.db.get<KnowledgeFact>(sql, params, (err, row) => resolve(row || null));
             });
+        } catch (_) {}
+
+        if (existing) {
+            const isSameVal = existing.value.trim().toLowerCase() === fact.value.trim().toLowerCase();
+            const keyNeedsUpdate = existing.key !== fact.key;
+
+            if (isSameVal && !keyNeedsUpdate) {
+                console.log(`[Memory] Fact deduplicated (identical value exists). Updating timestamp: [${fact.category}] ${fact.key}`);
+                await this.db.run(
+                    `UPDATE knowledge SET timestamp = ? WHERE id = ?`,
+                    [nowIso, existing.id]
+                );
+                return { success: true, action: "deduplicated", key: fact.key, value: fact.value, category: fact.category };
+            }
+
+            console.log(`[Memory] Fact updated (key: "${existing.key}" -> "${fact.key}"): "${existing.value}" -> "${fact.value}"`);
+            await this.db.run(
+                `UPDATE knowledge SET key = ?, value = ?, confidence = ?, timestamp = ?, category = ? WHERE id = ?`,
+                [fact.key, fact.value, fact.confidence, nowIso, fact.category, existing.id]
+            );
+
+            // Vectorize updated fact
+            if (this.vectorStore) {
+                try {
+                    const docText = `Fact [${fact.category}] ${fact.key.replace(/_/g, " ")}: ${fact.value}`;
+                    const docObj = {
+                        pageContent: docText,
+                        metadata: {
+                            id: existing.id,
+                            chatId,
+                            type: "KNOWLEDGE",
+                            category: fact.category,
+                            key: fact.key,
+                            value: fact.value,
+                            timestamp: nowIso
+                        }
+                    };
+                    await this.vectorStore.addDocuments([docObj]);
+                    this.persistSingleVector(docObj).catch(() => {});
+                } catch (vErr: any) {
+                    console.warn("[Memory] Vector sync warning for fact update:", vErr.message);
+                }
+            }
+
+            return { success: true, action: "updated", key: fact.key, value: fact.value, category: fact.category };
         }
 
-        return new Promise((resolve) => {
+        // 2. Insert new structured fact
+        const id = `fact_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
+        await new Promise<boolean>((resolve) => {
             this.db.run(
                 `INSERT INTO knowledge (id, chat_id, category, key, value, confidence, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-                [id, chatId, category, key, value, confidence, nowIso],
+                [id, chatId, fact.category, fact.key, fact.value, fact.confidence, nowIso],
                 (err) => {
                     if (err) {
                         console.error("[Memory] Save Fact Error:", err.message);
                         resolve(false);
                     } else {
-                        console.log(`[Memory] Saved Fact -> [${chatId}][${category}] ${key}: "${value}"`);
+                        console.log(`[Memory] Saved Structured Fact -> [${chatId}][${fact.category}] ${fact.key}: "${fact.value}"`);
                         resolve(true);
                     }
                 }
             );
         });
+
+        // Vectorize new fact
+        if (this.vectorStore) {
+            try {
+                const docText = `Fact [${fact.category}] ${fact.key.replace(/_/g, " ")}: ${fact.value}`;
+                const docObj = {
+                    pageContent: docText,
+                    metadata: {
+                        id,
+                        chatId,
+                        type: "KNOWLEDGE",
+                        category: fact.category,
+                        key: fact.key,
+                        value: fact.value,
+                        timestamp: nowIso
+                    }
+                };
+                await this.vectorStore.addDocuments([docObj]);
+                this.persistSingleVector(docObj).catch(() => {});
+            } catch (vErr: any) {
+                console.warn("[Memory] Vector sync warning for new fact:", vErr.message);
+            }
+        }
+
+        return { success: true, action: "created", key: fact.key, value: fact.value, category: fact.category };
+    }
+
+    public async saveFact(category: string, key: string, value: string, confidence: number = 1.0, chatId: string = "default"): Promise<boolean> {
+        const fact: ExtractedFact = {
+            category: (category as any) || "user_memory",
+            key: FactExtractionEngine.toCleanSnakeCase(key, 32),
+            value: value.trim(),
+            confidence,
+            rawStatement: `${key}: ${value}`,
+            aliases: [key, FactExtractionEngine.toCleanSnakeCase(key, 32)]
+        };
+        const res = await this.saveStructuredFact(fact, chatId);
+        return res.success;
     }
 
     public async getAllFacts(chatId: string = "default"): Promise<KnowledgeFact[]> {
@@ -306,38 +379,120 @@ export class MemoryManager {
     }
 
     private async extractFactsFromText(userInput: string, chatId: string = "default"): Promise<void> {
-        const text = userInput.trim();
+        // Questions and conversational pleasantries are not user facts to store in knowledge
+        if (this.isQuestion(userInput) || this.classifyMessageIntent(userInput) === "CONVERSATION") {
+            return;
+        }
+        try {
+            const engine = FactExtractionEngine.getInstance();
+            const extracted = await engine.extractFact(userInput);
+            if (extracted && extracted.confidence >= 0.85 && extracted.value) {
+                await this.saveStructuredFact(extracted, chatId);
+            }
+        } catch (e: any) {
+            console.warn("[Memory] Automatic fact extraction warning:", e.message);
+        }
+    }
 
-        const nameMatch = text.match(/(?:remember\s+(?:that\s+)?my\s+name\s+is|my\s+name\s+is|call\s+me|i\s+am)\s+([A-Za-z0-9\s'-]+?)(?:\.|\!|,|\s+please|\s+remember|\s+save|\s+and|$)/i);
-        if (nameMatch && nameMatch[1] && !["a", "the", "building", "working", "going", "here", "ready"].includes(nameMatch[1].toLowerCase().trim())) {
-            await this.saveFact("user_profile", "user_name", nameMatch[1].trim(), 1.0, chatId);
+    private async persistSingleVector(doc: { pageContent: string; metadata: any }): Promise<void> {
+        if (!this.db || this.db.getDriverName() !== "turso" || !this.vectorStore) return;
+        try {
+            const vecId = doc.metadata?.id || `vec_${Date.now()}`;
+            const chatId = doc.metadata?.chatId || "default";
+            const vecObj = this.vectorStore.memoryVectors.find((v: any) => v.metadata?.id === vecId);
+            const embedding = vecObj?.embedding || [];
+            if (embedding.length > 0) {
+                await this.db.run(
+                    `INSERT OR REPLACE INTO semantic_vectors (id, chat_id, content, metadata, embedding) VALUES (?, ?, ?, ?, ?)`,
+                    [vecId, chatId, doc.pageContent, JSON.stringify(doc.metadata || {}), JSON.stringify(embedding)]
+                );
+            }
+        } catch (e: any) {
+            console.warn("[Memory] Warning persisting single vector to Turso:", e.message);
+        }
+    }
+
+    // --- CONVERSATION HISTORY & QUESTION CLASSIFICATION ---
+
+    public isQuestion(text: string): boolean {
+        if (!text) return false;
+        const trimmed = text.trim();
+        if (trimmed.endsWith("?")) return true;
+        const lower = trimmed.toLowerCase();
+        return /^(?:what|why|how|who|whom|whose|when|where|which|is|are|was|were|do|does|did|can|could|would|should|will|have|has|had|tell me|explain|can you|could you)\b/i.test(lower);
+    }
+
+    public classifyMessageIntent(text: string): "QUESTION" | "STATEMENT" | "COMMAND" | "CONVERSATION" {
+        if (!text) return "CONVERSATION";
+        const trimmed = text.trim();
+        const lower = trimmed.toLowerCase();
+
+        // Conversational pleasantries (including greeting questions like "hello there, how are you?")
+        if (/^(?:hi|hello|hey|greetings|howdy|good\s+(?:morning|afternoon|evening|night)|thanks|thank\s+you|bye|goodbye|ok|cool|nice)\b/i.test(trimmed)) {
+            return "CONVERSATION";
+        }
+        if (/^(?:how\s+are\s+you(?:\s+doing)?|whats\s+up|what's\s+up|how\s+is\s+it\s+going)[\s!.,?]*$/i.test(trimmed)) {
+            return "CONVERSATION";
         }
 
-        const studentMatch = text.match(/(?:i am a|i am an|studying|student of)\s+([a-zA-Z\s]+?)\s+(?:student|degree|dept|department)/i);
-        if (studentMatch && studentMatch[1]) {
-            await this.saveFact("user_profile", "student_type", studentMatch[1].trim(), 1.0, chatId);
+        // Directives & commands
+        if (/^(?:remember|store|save|memorize|keep\s+in\s+mind|note\s+down|run|execute|generate|create|write|scrape|browse|set|update)\b/i.test(lower)) {
+            return "COMMAND";
         }
 
-        const collegeMatch = text.match(/(?:at|from|in|study at|studying at)\s+([A-Za-z0-9\s]+?)\s+(?:college|university|institute|institution|school)/i);
-        if (collegeMatch && collegeMatch[1]) {
-            const collegeName = `${collegeMatch[1].trim()} College`;
-            await this.saveFact("user_profile", "college", collegeName, 1.0, chatId);
+        // Interrogatives & questions
+        if (this.isQuestion(trimmed)) {
+            return "QUESTION";
         }
 
-        const yearMatch = text.match(/(final|1st|2nd|3rd|4th|first|second|third|fourth)\s+year/i);
-        if (yearMatch) {
-            await this.saveFact("user_profile", "year", `${yearMatch[1].toLowerCase()} year`, 1.0, chatId);
+        // Factual statements
+        if (/^(?:my\s+[a-z0-9_\-\s]+?\s+is|i\s+am|i\s+study|i\s+work|i\s+prefer|i\s+like|our\s+[a-z0-9_\-\s]+?\s+is)\b/i.test(lower)) {
+            return "STATEMENT";
         }
 
-        const projectMatch = text.match(/(?:my project is|building|working on|developing)\s+([A-Za-z0-9\s\-_]+?)(?:\.|,|\s+as|\s+for|$)/i);
-        if (projectMatch && projectMatch[1] && projectMatch[1].length > 3) {
-            await this.saveFact("project", "project_name", projectMatch[1].trim(), 1.0, chatId);
-        }
+        return "CONVERSATION";
+    }
 
-        const prefMatch = text.match(/(?:i prefer|i like|i love)\s+([A-Za-z0-9\s\-_]+?)(?:\.|,|$)/i);
-        if (prefMatch && prefMatch[1]) {
-            await this.saveFact("preference", `pref_${Date.now()}`, prefMatch[1].trim(), 1.0, chatId);
-        }
+    public async getRecentQuestions(
+        chatId: string = "default",
+        limit: number = 5
+    ): Promise<Array<{ id: string; question: string; answer: string; timestamp: string }>> {
+        await this.initialize().catch(() => {});
+        return new Promise((resolve) => {
+            const sql = `SELECT id, user_msg, agent_res, timestamp FROM interactions WHERE chat_id = ? ORDER BY timestamp DESC LIMIT 60`;
+            this.db.all(sql, [chatId], (err, rows: any[]) => {
+                if (err || !rows) return resolve([]);
+                const questions = rows.filter(r => r && r.user_msg && this.isQuestion(r.user_msg));
+                const slice = questions.slice(0, limit);
+                // Return in chronological order (oldest to newest)
+                resolve(slice.reverse().map(r => ({
+                    id: r.id,
+                    question: r.user_msg,
+                    answer: r.agent_res,
+                    timestamp: r.timestamp
+                })));
+            });
+        });
+    }
+
+    public async getRecentMessages(
+        chatId: string = "default",
+        limit: number = 5
+    ): Promise<Array<{ id: string; message: string; response: string; timestamp: string }>> {
+        await this.initialize().catch(() => {});
+        return new Promise((resolve) => {
+            const sql = `SELECT id, user_msg, agent_res, timestamp FROM interactions WHERE chat_id = ? ORDER BY timestamp DESC LIMIT ?`;
+            this.db.all(sql, [chatId, limit], (err, rows: any[]) => {
+                if (err || !rows) return resolve([]);
+                // Return in chronological order (oldest to newest)
+                resolve(rows.reverse().map(r => ({
+                    id: r.id,
+                    message: r.user_msg,
+                    response: r.agent_res,
+                    timestamp: r.timestamp
+                })));
+            });
+        });
     }
 
     // --- LOCAL RELEVANCE RANKING ---
@@ -367,15 +522,42 @@ export class MemoryManager {
     public async searchMemory(query: string, chatId: string = "default"): Promise<string> {
         await this.initialize().catch(() => { });
         const results: string[] = [];
+        const lowerQ = query.toLowerCase().trim();
+
+        // 1. Check for History Retrieval Queries (Last N Questions or Last N Messages)
+        const isQuestionHistory = /\b(?:(?:last|previous|recent)\s+(\d+)?\s*questions?|what\s+(?:was|were)\s+my\s+last\s+question|what\s+did\s+i\s+(?:last\s+)?ask)\b/i.test(lowerQ);
+        const isMessageHistory = !isQuestionHistory && /\b(?:(?:last|previous|recent)\s+(\d+)?\s*(?:messages?|chats?|turns?|texts?)|what\s+did\s+i\s+(?:just\s+)?say|conversation\s+history)\b/i.test(lowerQ);
+
+        if (isQuestionHistory) {
+            const limitMatch = lowerQ.match(/\b(?:last|previous|recent)\s+(\d+)\s*questions?\b/i);
+            const limit = limitMatch ? parseInt(limitMatch[1], 10) : 5;
+            const questions = await this.getRecentQuestions(chatId, limit);
+            if (questions.length === 0) {
+                return `No previous questions found in conversation history for this chat.`;
+            }
+            return `[CONVERSATION HISTORY - RECENT QUESTIONS (Chronological)]\n` +
+                questions.map((q, idx) => `${idx + 1}. [${q.timestamp || 'Recent'}] User asked: "${q.question}"\n   Bot answered: "${q.answer}"`).join("\n\n");
+        }
+
+        if (isMessageHistory) {
+            const limitMatch = lowerQ.match(/\b(?:last|previous|recent)\s+(\d+)\s*(?:messages?|chats?|turns?|texts?)\b/i);
+            const limit = limitMatch ? parseInt(limitMatch[1], 10) : 5;
+            const msgs = await this.getRecentMessages(chatId, limit);
+            if (msgs.length === 0) {
+                return `No recent messages found in conversation history for this chat.`;
+            }
+            return `[CONVERSATION HISTORY - RECENT MESSAGES (Chronological)]\n` +
+                msgs.map((m, idx) => `${idx + 1}. [${m.timestamp || 'Recent'}] User: "${m.message}"\n   Bot: "${m.response}"`).join("\n\n");
+        }
 
         const facts = await this.getAllFacts(chatId);
-        const lowerQ = query.toLowerCase().trim();
         const isNameQuery = lowerQ === "user_name" || /\b(?:name|who am i|user_name)\b/i.test(lowerQ);
 
         const stopWords = new Set([
             "my", "the", "a", "an", "about", "did", "i", "save", "what", "is", "for", 
             "please", "me", "and", "or", "tell", "show", "can", "you", "your",
-            "do", "have", "any", "know", "with", "which", "are", "in", "to"
+            "do", "have", "any", "know", "with", "which", "are", "in", "to", "called",
+            "named", "titled", "remember", "stored", "recall"
         ]);
 
         const queryWords = lowerQ
@@ -383,12 +565,25 @@ export class MemoryManager {
             .split(/\s+/)
             .filter(w => !stopWords.has(w) && w.length > 2);
 
-        // Expand common synonyms
+        // 2. Comprehensive Synonym & Concept Expansion
         const expandedQueryWords = new Set<string>(queryWords);
-        if (expandedQueryWords.has("database")) expandedQueryWords.add("db");
-        if (expandedQueryWords.has("db")) expandedQueryWords.add("database");
-        if (expandedQueryWords.has("languages")) expandedQueryWords.add("language");
-        if (expandedQueryWords.has("preferences")) expandedQueryWords.add("preference");
+        const synonymGroups: string[][] = [
+            ["sample", "demo", "example", "test", "prototype", "trial"],
+            ["project", "app", "application", "software", "codebase", "system", "tool", "program"],
+            ["name", "called", "named", "titled", "alias", "known"],
+            ["favorite", "favourite", "preferred", "liked", "best", "choice"],
+            ["language", "lang", "programming language", "code"],
+            ["database", "db", "storage", "datastore"],
+            ["platform", "host", "hosting", "deployment", "server", "cloud"],
+            ["college", "university", "institute", "school", "campus"],
+            ["year", "academic year", "class"]
+        ];
+
+        for (const group of synonymGroups) {
+            if (group.some(word => queryWords.includes(word))) {
+                group.forEach(w => expandedQueryWords.add(w));
+            }
+        }
 
         const matchingFacts = facts.filter(f => {
             const keyLower = f.key.toLowerCase().replace(/_/g, " ");
@@ -407,6 +602,47 @@ export class MemoryManager {
 
             return false;
         });
+
+        // 3. Dense Vector Similarity Search for Facts & Conversation
+        if (this.vectorStore) {
+            try {
+                let timer: NodeJS.Timeout;
+                const timeoutPromise = new Promise<any[]>((_, reject) => {
+                    timer = setTimeout(() => reject(new Error("VECTOR_SEARCH_TIMEOUT")), 5000);
+                });
+                const vecDocs = await Promise.race([
+                    this.vectorStore.similaritySearch(query, 6),
+                    timeoutPromise
+                ]).finally(() => clearTimeout(timer!));
+
+                const userVecDocs = vecDocs ? vecDocs.filter(d => {
+                    if (d.metadata?.isDoc) return true;
+                    if (chatId === "default") return !d.metadata?.chatId || d.metadata.chatId === "default";
+                    return d.metadata?.chatId === chatId;
+                }) : [];
+
+                if (userVecDocs && userVecDocs.length > 0) {
+                    for (const doc of userVecDocs) {
+                        if (doc.metadata?.type === "KNOWLEDGE" && doc.metadata?.key) {
+                            if (!matchingFacts.some(f => f.key === doc.metadata.key)) {
+                                matchingFacts.push({
+                                    id: doc.metadata.id || "vec_fact",
+                                    chat_id: chatId,
+                                    category: doc.metadata.category || "user_memory",
+                                    key: doc.metadata.key,
+                                    value: doc.metadata.value || doc.pageContent,
+                                    confidence: 0.9,
+                                    timestamp: doc.metadata.timestamp || new Date().toISOString()
+                                });
+                            }
+                        }
+                    }
+                    results.push(`[SEMANTIC_MEMORY MATCHES]\n` + userVecDocs.map(d => docToText(d)).join("\n---\n"));
+                }
+            } catch (e: any) {
+                console.log('[Memory] Vector search unavailable — using SQLite only.');
+            }
+        }
 
         // Sort matching facts by number of matching keywords descending
         matchingFacts.sort((a, b) => {
@@ -430,10 +666,11 @@ export class MemoryManager {
             results.push(`[USER_FACTS MATCHES]\n` + matchingFacts.map(f => `• [${f.category}] ${f.key}: ${f.value}`).join("\n"));
         }
 
+        // 4. Conversation Turns Match
         const interactions = await new Promise<any[]>((resolve) => {
             const sql = chatId === "default"
-                ? `SELECT user_msg, agent_res FROM interactions WHERE chat_id = 'default' AND (user_msg LIKE ? OR agent_res LIKE ?) LIMIT 5`
-                : `SELECT user_msg, agent_res FROM interactions WHERE chat_id = ? AND (user_msg LIKE ? OR agent_res LIKE ?) LIMIT 5`;
+                ? `SELECT user_msg, agent_res FROM interactions WHERE chat_id = 'default' AND (user_msg LIKE ? OR agent_res LIKE ?) ORDER BY timestamp DESC LIMIT 5`
+                : `SELECT user_msg, agent_res FROM interactions WHERE chat_id = ? AND (user_msg LIKE ? OR agent_res LIKE ?) ORDER BY timestamp DESC LIMIT 5`;
             const params = chatId === "default" ? [`%${query}%`, `%${query}%`] : [chatId, `%${query}%`, `%${query}%`];
             this.db.all(
                 sql,
@@ -446,31 +683,6 @@ export class MemoryManager {
 
         if (interactions.length > 0) {
             results.push(`[CONVERSATION MATCHES]\n` + interactions.map(i => `User: ${i.user_msg}\nAgent: ${i.agent_res}`).join("\n\n"));
-        }
-
-        if (this.vectorStore) {
-            try {
-                let timer: NodeJS.Timeout;
-                const timeoutPromise = new Promise<any[]>((_, reject) => {
-                    timer = setTimeout(() => reject(new Error("VECTOR_SEARCH_TIMEOUT")), 5000);
-                });
-                const vecDocs = await Promise.race([
-                    this.vectorStore.similaritySearch(query, 5),
-                    timeoutPromise
-                ]).finally(() => clearTimeout(timer!));
-
-                const userVecDocs = vecDocs ? vecDocs.filter(d => {
-                    if (d.metadata?.isDoc || d.metadata?.type === "KNOWLEDGE") return true;
-                    if (chatId === "default") return !d.metadata?.chatId || d.metadata.chatId === "default";
-                    return d.metadata?.chatId === chatId;
-                }) : [];
-
-                if (userVecDocs && userVecDocs.length > 0) {
-                    results.push(`[SEMANTIC_MEMORY MATCHES]\n` + userVecDocs.map(d => docToText(d)).join("\n---\n"));
-                }
-            } catch (e: any) {
-                console.log('[Memory] Vector search unavailable — using SQLite only.');
-            }
         }
 
         return results.length > 0 ? results.join("\n\n") : `No memory records found matching query: "${query}"`;
@@ -601,20 +813,19 @@ export class MemoryManager {
                         if (this.vectorStore) {
                             try {
                                 const combinedDoc = `User: ${userInput}\nAgent: ${agentResponse}`;
-                                await this.vectorStore.addDocuments([
-                                    {
-                                        pageContent: combinedDoc,
-                                        metadata: {
-                                            id,
-                                            chatId,
-                                            userInput,
-                                            agentResponse,
-                                            type: "CONVERSATION",
-                                            timestamp: new Date().toISOString()
-                                        }
+                                const newDoc = {
+                                    pageContent: combinedDoc,
+                                    metadata: {
+                                        id,
+                                        chatId,
+                                        userInput,
+                                        agentResponse,
+                                        type: "CONVERSATION",
+                                        timestamp: new Date().toISOString()
                                     }
-                                ]);
-                                await this.saveVectorStore();
+                                };
+                                await this.vectorStore.addDocuments([newDoc]);
+                                this.persistSingleVector(newDoc).catch(() => {});
                             } catch (vErr: any) {
                                 console.warn("[Memory] Vector Embedding Error (Ignored for interaction save):", vErr.message);
                             }

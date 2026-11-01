@@ -1,0 +1,58 @@
+{
+  "timestamp": "2026-10-14T13:07:02.912Z",
+  "totalTests": 10,
+  "totalPass": 10,
+  "passRate": "100%",
+  "results": [
+    {
+      "name": "Basic Telegram conversation",
+      "status": "PASS",
+      "evidence": "Delivered conversational response (211 chars): \"I’m OpenClaw Echo, an autonomous AI assistant built on TypeScript. I can read, list, and write project files, run code, ...\""
+    },
+    {
+      "name": "Conversation memory recall",
+      "status": "PASS",
+      "evidence": "Successfully stored and recalled stored fact \"favorite_ide_secret\": \"AntigravityEchoIDE_Key99\" across memory context layer."
+    },
+    {
+      "name": "Genuine web search",
+      "status": "PASS",
+      "evidence": "Live Tavily search returned structured results (1179 chars). Preview: \"🔍 *Latest Search Updates*  💡 *Direct Answer*: The sources provided do not offer specific details about the latest artificial intelligence ...\""
+    },
+    {
+      "name": "Successful and failed website retrieval",
+      "status": "PASS",
+      "evidence": "Success: Scraped example.com (Scraped content from https://example.com (171 characters):  Example Do...). SSRF Guards: 127.0.0.1 and 169.254.169.254 blocked with Safety Error. HTTP 404 error correctly reported: \"Failed to scrape https://httpbin.org/status/404: fetch faile\"."
+    },
+    {
+      "name": "TypeScript file creation inside the sandbox",
+      "status": "PASS",
+      "evidence": "Created 'src/sandbox/math_calc_test.ts' (171 bytes). Output: \"Successfully created and verified file 'src/sandbox/math_calc_test.ts' (171 bytes).\". Code contains TypeScript function signatures."
+    },
+    {
+      "name": "File existence verification",
+      "status": "PASS",
+      "evidence": "1) Verified existing file runs with ts-node: \"Script Output:\nFactorial 5: 120\". 2) Non-existent file cleanly rejected: \"Execution failed: File 'src/sandbox/phantom_ghost_file.js' does not exist on disk.\". 3) Path traversal escape strictly blocked: \"Safety Violation: Path is outside the permitted src/sandbox directory.\"."
+    },
+    {
+      "name": "CodingSubAgent delegation",
+      "status": "PASS",
+      "evidence": "Sub-agent completed in 1150ms. Output clearly separated into 3 sections: 1. Generated Code, 2. Saved File Status (Verified on disk: src/sandbox/reverseString.ts), 3. Execution Status (NOT EXECUTED). Physical file verified on disk."
+    },
+    {
+      "name": "LLM timeout and fallback",
+      "status": "PASS",
+      "evidence": "Circuit breaker tripped for groq-fast (cooldown active). Waterfall successfully failed over to backup provider: \"WATERFALL_SUCCESS\". Request-level cancellation via AbortSignal caught and rejected immediately without delay."
+    },
+    {
+      "name": "Duplicate reply prevention",
+      "status": "PASS",
+      "evidence": "Exactly 1 reply was dispatched. Second concurrent/late reply was suppressed. Aborted request did not trigger replyFn in executeAutonomousFlow catch block."
+    },
+    {
+      "name": "Recovery after a failed tool call",
+      "status": "PASS",
+      "evidence": "LocalVerifier accurately caught failure (\"Local verification failed: local_file_system output reported an error (\"Error: ENOENT: no such file or directory, stat 'src/sandbox/non_existent.txt'\")\"). Self-healing recovery engine generated strategy: 'alternative_tool' (The requested file does not exist. First list the contents of the sandbox directory to identify an existing file to read.). Real tools (manage_project_goals, manage_git_repository) responded with genuine state without fabricated fallbacks."
+    }
+  ]
+}

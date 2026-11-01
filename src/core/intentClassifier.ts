@@ -64,7 +64,10 @@ export const EXPLICIT_MEMORY_PATTERNS = [
     /\b(?:what\s+did\s+i\s+save|what\s+do\s+you\s+remember|recall|search\s+memory|saved\s+facts?|my\s+notes?)\b/i,
     /\b(?:get\s+all\s+knowledge|memory\s+stats|what\s+is\s+in\s+memory|recall\s+fact)\b/i,
     /\b(?:what(?:'s|\s+is)\s+my\s+name|who\s+am\s+i|do\s+you\s+(?:know|remember)\s+my\s+name|tell\s+me\s+my\s+name|what\s+is\s+my\s+identity)\b/i,
-    /\b(?:my\s+name\s+is|call\s+me)\s+[A-Za-z0-9\s'-]+/i
+    /\b(?:my\s+name\s+is|call\s+me)\s+[A-Za-z0-9\s'-]+/i,
+    /\b(?:last|previous|recent)\s+(\d+)?\s*(?:questions?|messages?|chats?|turns?|queries)\b/i,
+    /\b(?:what\s+(?:was|were)\s+my\s+last\s+(?:question|message)|what\s+did\s+i\s+(?:last\s+)?ask|what\s+did\s+i\s+(?:just\s+)?say|conversation\s+history)\b/i,
+    /\b(?:what\s+is\s+my\s+(?:sample\s+|demo\s+|test\s+|side\s+)?project|what\s+is\s+my\s+favorite|what\s+is\s+my\s+favourite|what\s+is\s+my\s+email|what\s+is\s+my\s+college)\b/i
 ];
 
 // 5. Simple Conversation & Pleasantries Patterns

@@ -851,6 +851,42 @@ export const searchMemoryTool = tool(
     }
 );
 
+export const getConversationHistoryTool = tool(
+    async ({ chatId, filter, limit }: { chatId?: string; filter?: "questions_only" | "all_messages"; limit?: number } = {}) => {
+        try {
+            const cid = chatId || "default";
+            const lim = limit || 5;
+            if (filter === "questions_only") {
+                const qs = await memory.getRecentQuestions(cid, lim);
+                if (qs.length === 0) return "No previous questions recorded in conversation history.";
+                return JSON.stringify({
+                    type: "questions",
+                    count: qs.length,
+                    items: qs
+                }, null, 2);
+            }
+            const msgs = await memory.getRecentMessages(cid, lim);
+            if (msgs.length === 0) return "No previous messages recorded in conversation history.";
+            return JSON.stringify({
+                type: "all_messages",
+                count: msgs.length,
+                items: msgs
+            }, null, 2);
+        } catch (error: any) {
+            return `Error retrieving conversation history: ${error.message}`;
+        }
+    },
+    {
+        name: "get_conversation_history",
+        description: "Retrieves recent conversation history (questions or all messages) in chronological order for a specific chat ID.",
+        schema: z.object({
+            chatId: z.string().optional().describe("Optional user or chat ID for scoped history retrieval"),
+            filter: z.enum(["questions_only", "all_messages"]).optional().describe("Filter by 'questions_only' or 'all_messages' (default: all_messages)"),
+            limit: z.number().optional().describe("Maximum number of interactions to retrieve (default: 5)")
+        })
+    }
+);
+
 export const generateDataChartTool = tool(
     async ({ title, type, dataJSON }: { title: string, type: string, dataJSON: string }) => {
         try {
@@ -1405,11 +1441,13 @@ export const conversationContextTool = tool(
         const persona = "Autonomous Multi-Agent AI Framework (OpenClaw Echo)";
         let matchedFacts: any[] = [];
         let recentTurns: any[] = [];
+        let recentQuestions: any[] = [];
         try {
             const { MemoryManager } = await import("../memory/manager");
             const memoryInstance = MemoryManager.getInstance();
             matchedFacts = await memoryInstance.getAllFacts(chatId || "default");
             recentTurns = await memoryInstance.getRecentTurns(chatId || "default", 10);
+            recentQuestions = await memoryInstance.getRecentQuestions(chatId || "default", 5);
         } catch (_) {}
 
         return JSON.stringify({
@@ -1417,9 +1455,11 @@ export const conversationContextTool = tool(
             timestamp: now.toISOString(),
             system: persona,
             matchedFactsCount: matchedFacts.length,
-            sampleFacts: matchedFacts.slice(0, 5).map(f => `${f.key}: ${f.value}`),
+            sampleFacts: matchedFacts.slice(0, 8).map(f => `${f.key}: ${f.value}`),
             recentDialogueCount: recentTurns.length,
             recentDialogue: recentTurns.map(t => `User: ${t.user_msg}\nAgent: ${t.agent_res}`).join("\n\n"),
+            recentQuestionsCount: recentQuestions.length,
+            recentQuestions: recentQuestions.map((q, i) => `${i + 1}. Question: "${q.question}" -> Answer: "${q.answer}"`).join("\n"),
             note: "Local conversation context retrieved successfully. Use to formulate helpful, polite, and grounded conversational responses."
         });
     },
