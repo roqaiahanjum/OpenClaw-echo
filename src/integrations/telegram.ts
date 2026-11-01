@@ -25,7 +25,14 @@ import { AuthManager } from "../core/auth";
 import { classifyUserIntent } from "../core/intentClassifier";
 import { WebhookTracker } from "./webhookTracker";
 
-import { telemetry } from "./telemetry";
+console.log(`[PID:${process.pid}] Bot initialization`);
+let updateCounter = 0;
+let currentCorrId = '';
+function generateCorrId(updateId: any): string {
+    updateCounter++;
+    return `${updateId}-${updateCounter}`;
+}
+
 
 dotenv.config();
 
@@ -125,18 +132,21 @@ export function splitTelegramMessage(text: string, maxLen: number = 3800): strin
 }
 
 export async function safeSend(ctx: any, text: string, options: any = {}) {
+    console.log(`[PID:${process.pid}] [${currentCorrId}] safeSend start length=${text.length}`);
     const chunks = splitTelegramMessage(text, 3800);
 
     for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i];
         try {
+            console.log(`[PID:${process.pid}] [${currentCorrId}] ctx.reply (chunk ${i+1}/${chunks.length})`);
             await ctx.reply(chunk, { parse_mode: 'Markdown', ...options });
         } catch (err: any) {
-            console.warn(`[TelegramAPI] Markdown send failed for chunk ${i + 1}/${chunks.length}: ${err?.message}. Retrying plain text.`);
+            console.warn(`[PID:${process.pid}] [${currentCorrId}] Markdown send failed for chunk ${i + 1}/${chunks.length}: ${err?.message}. Retrying plain text.`);
             try {
+                console.log(`[PID:${process.pid}] [${currentCorrId}] ctx.reply plain fallback (chunk ${i+1})`);
                 await ctx.reply(chunk, options);
             } catch (retryErr: any) {
-                console.error(`[TelegramAPI] Plain text send failed for chunk ${i + 1}/${chunks.length}: ${retryErr?.message}`);
+                console.error(`[PID:${process.pid}] [${currentCorrId}] Plain text send failed for chunk ${i + 1}/${chunks.length}: ${retryErr?.message}`);
                 throw retryErr;
             }
         }
@@ -169,6 +179,7 @@ const invokeWithTimeout = async (messages: any[], mode?: string, options?: any, 
     const tStart = Date.now();
 
     try {
+        if (reqId) console.log(`[PID:${process.pid}] [LLM] invokeWithTimeout start mode=${mode || "agent"} reqId=${reqId}`);
         const result = await Promise.race([
             ModelRouter.getInstance().invokeWithRetry(messages, mode, mergedOptions),
             timeoutPromise,
@@ -276,6 +287,7 @@ export const executeAutonomousFlow = async (input: string, chatId?: string | num
             };
 
             const plannerResult = await SubAgentManager.getInstance().delegateTask(plannerTask);
+            console.log(`[PID:${process.pid}] [${currentCorrId}] delegateTask(planner) called reqId=${requestId}`);
             const finalResponse = plannerResult.resultData || `⚠️ [PlannerSubAgent Failed]: ${plannerResult.error || "Execution incomplete"}`;
 
             if (parentSignal?.aborted) throw new Error("FLOW_ABORTED");
@@ -304,6 +316,7 @@ export const executeAutonomousFlow = async (input: string, chatId?: string | num
             };
 
             const result = await SubAgentManager.getInstance().delegateTask(codingTask);
+            console.log(`[PID:${process.pid}] [${currentCorrId}] delegateTask(coding) called reqId=${requestId}`);
             const finalResponse = result.status === "SUCCESS"
                 ? result.resultData
                 : `⚠️ [CodingSubAgent Incomplete/Failed]: ${result.error || "Execution did not complete successfully"}`;
@@ -330,6 +343,7 @@ export const executeAutonomousFlow = async (input: string, chatId?: string | num
             };
 
             const result = await SubAgentManager.getInstance().delegateTask(researchTask);
+            console.log(`[PID:${process.pid}] [${currentCorrId}] delegateTask(research) called`);
             const finalResponse = result.status === "SUCCESS"
                 ? result.resultData
                 : `⚠️ [ResearchSubAgent Incomplete/Failed]: ${result.error || "Research could not be completed"}`;
@@ -356,6 +370,7 @@ export const executeAutonomousFlow = async (input: string, chatId?: string | num
             };
 
             const result = await SubAgentManager.getInstance().delegateTask(browserTask);
+            console.log(`[PID:${process.pid}] [${currentCorrId}] delegateTask(browser) called`);
             const finalResponse = result.status === "SUCCESS"
                 ? result.resultData
                 : `⚠️ [BrowserSubAgent Incomplete/Failed]: ${result.error || "Webpage could not be inspected"}`;
@@ -382,6 +397,7 @@ export const executeAutonomousFlow = async (input: string, chatId?: string | num
             };
 
             const result = await SubAgentManager.getInstance().delegateTask(memTask);
+            console.log(`[PID:${process.pid}] [${currentCorrId}] delegateTask(memory) called`);
             const finalResponse = result.status === "SUCCESS"
                 ? result.resultData
                 : `⚠️ [MemorySubAgent Incomplete/Failed]: ${result.error || "Memory operation could not be completed"}`;
@@ -408,6 +424,7 @@ export const executeAutonomousFlow = async (input: string, chatId?: string | num
             };
 
             const result = await SubAgentManager.getInstance().delegateTask(convTask);
+            console.log(`[PID:${process.pid}] [${currentCorrId}] delegateTask(conversation) called`);
             const finalResponse = result.status === "SUCCESS"
                 ? result.resultData
                 : `⚠️ [ConversationSubAgent Incomplete/Failed]: ${result.error || "Unable to retrieve conversation context"}`;
@@ -708,10 +725,13 @@ async function enqueueChatProcessing(chatId: string, fn: () => Promise<void>): P
     return current;
 }
 
-async function processTelegramMessage(ctx: Context) {
+export async function processTelegramMessage(ctx: Context) {
+    console.log(`[PID:${process.pid}] [${currentCorrId}] processTelegramMessage entry`);
+
     if (!ctx.message) return;
 
     const updateId = ctx.update?.update_id ?? "unknown";
+    currentCorrId = generateCorrId(updateId);
     const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     console.log(`[DIAG:${requestId}] 1. Telegram update received (UpdateID: ${updateId})`);
     console.log(`[DIAG:${requestId}] 2. telegramHandler started`);
@@ -778,6 +798,7 @@ async function processTelegramMessage(ctx: Context) {
         );
 
         const replyHandler = async (finalResponse: string) => {
+            console.log(`[PID:${process.pid}] [${currentCorrId}] replyHandler called length=${finalResponse.length} hasDispatched=${hasDispatchedFinalReply}`);
             if (hasDispatchedFinalReply) {
                 console.log(`[StructuredLog] [RequestId:${requestId}] [Event:DuplicateReplySuppressed]`);
                 return;
@@ -869,6 +890,7 @@ async function processTelegramMessage(ctx: Context) {
         };
 
         const progressHandler = async (progressText: string) => {
+            console.log(`[PID:${process.pid}] [${currentCorrId}] progressHandler called`);
             if (hasDispatchedFinalReply || flowAbortController.signal.aborted) return;
             if (statusMessageId !== null) {
                 try {
@@ -927,6 +949,9 @@ async function processTelegramMessage(ctx: Context) {
 
 async function telegramHandler(ctx: Context) {
     if (!ctx.message) return;
+    const updateId = (ctx.update as any)?.update_id ?? "unknown";
+    const tmpCorrId = `${updateId}-${updateCounter + 1}`;
+    console.log(`[PID:${process.pid}] [${tmpCorrId}] telegramHandler entry`);
     const callerId = ctx.chat?.id != null ? String(ctx.chat.id) : (ctx.from?.id != null ? String(ctx.from.id) : "default");
     return enqueueChatProcessing(callerId, async () => {
         await processTelegramMessage(ctx);
@@ -1212,13 +1237,13 @@ app.get("/telemetry", async (req: Request, res: Response) => {
 });
 
 app.get("/api/telemetry/stream", (req: Request, res: Response) => {
-    telemetry.handleSSEStream(req, res);
+    Telemetry.subscribe(res);
 });
 
 app.get("/api/stats", async (req: Request, res: Response) => {
     try {
         const memStats = await memory.getStats();
-        const execStats = telemetry.getExecutionStats();
+        const execStats = {}; // Telemetry.getExecutionStats() not available
         const routerHealth = await router.checkHealth();
         res.json({
             memory: memStats,
