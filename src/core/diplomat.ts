@@ -1,5 +1,13 @@
 import * as nodemailer from "nodemailer";
 
+export interface SendReportResult {
+    success: boolean;
+    accepted: string[];
+    rejected: string[];
+    messageId?: string;
+    error?: string;
+}
+
 /**
  * Diplomat: Autonomous Email Communication Engine
  * Sends rich HTML email reports to external stakeholders.
@@ -42,7 +50,7 @@ export class Diplomat {
         subject: string;
         body: string;
         agentName?: string;
-    }): Promise<void> {
+    }): Promise<SendReportResult> {
         const transporter = this.createTransporter();
         const from = process.env.SMTP_FROM || process.env.SMTP_USER;
         const agentName = options.agentName || "OpenClaw Echo";
@@ -79,7 +87,7 @@ export class Diplomat {
 </body>
 </html>`;
 
-        await transporter.sendMail({
+        const info = await transporter.sendMail({
             from: `"${agentName}" <${from}>`,
             to: options.to,
             subject: options.subject,
@@ -87,6 +95,18 @@ export class Diplomat {
             text: options.body
         });
 
-        console.log(`[Diplomat] Email report sent to: ${options.to}`);
+        const accepted = Array.isArray(info?.accepted) ? info.accepted.map(String) : [];
+        const rejected = Array.isArray(info?.rejected) ? info.rejected.map(String) : [];
+        const target = options.to.toLowerCase().trim();
+        const isAccepted = accepted.some(addr => addr.toLowerCase().includes(target) || target.includes(addr.toLowerCase()));
+
+        console.log(`[Diplomat] Email report send attempt to: ${options.to}. Accepted: ${accepted.join(",")}, Rejected: ${rejected.join(",")}`);
+
+        return {
+            success: isAccepted,
+            accepted,
+            rejected,
+            messageId: info?.messageId
+        };
     }
 }

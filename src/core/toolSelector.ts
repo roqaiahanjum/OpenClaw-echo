@@ -56,7 +56,7 @@ const TOOL_DOMAINS: Record<string, { toolNames: string[]; keywords: RegExp }> = 
     },
     email: {
         toolNames: ["send_email_report"],
-        keywords: /\b(email|mail|send email|smtp|email report)\b/i
+        keywords: /\b(?:email|mail|send email|smtp|email report|[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\b/i
     },
     time: {
         toolNames: ["get_current_time"],
@@ -77,15 +77,20 @@ export class ToolSelector {
     /**
      * Determines required capabilities from the user prompt and returns only relevant tool schemas.
      */
-    static selectTools(prompt: string): ToolSelectionResult {
+    static selectTools(prompt: string, contextTurns?: Array<{ user: string; bot?: string } | string>): ToolSelectionResult {
         const trimmed = prompt.trim();
+        let contextCombined = trimmed;
+        if (contextTurns && Array.isArray(contextTurns) && contextTurns.length > 0) {
+            const historyStr = contextTurns.map(t => typeof t === "string" ? t : `${t.user || ""} ${t.bot || ""}`).join(" ");
+            contextCombined = `${trimmed} ${historyStr}`.trim();
+        }
 
         // 1. Identify all matching domains first
         const matchedToolNames = new Set<string>();
         const matchedDomains: string[] = [];
 
         for (const [domain, config] of Object.entries(TOOL_DOMAINS)) {
-            if (config.keywords.test(trimmed)) {
+            if (config.keywords.test(trimmed) || config.keywords.test(contextCombined)) {
                 matchedDomains.push(domain);
                 config.toolNames.forEach(name => matchedToolNames.add(name));
             }

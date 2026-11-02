@@ -31,53 +31,51 @@ import {
  * A centralized hub for all autonomous tools available to the Agent.
  */
 export class SkillRegistry {
-    private static tools = [
-        webSearchTool,
-        localFileSystemTool,
-        writeSandboxFileTool,
-        currentTimeTool,
-        updateUserProfileTool,
-        runSandboxCodeTool,
-        synthesizeSkillTool,
-        visualizeArchitectureTool,
-        ingestKnowledgeTool,
-        generateDataChartTool,
-        runSystemAuditTool,
-        generateProjectManualTool,
-        manageProjectGoalsTool,
-        scrapeWebsiteTool,
-        delegateTaskTool,
-        sendEmailReportTool,
-        manageScheduledTasksTool,
-        manageGitRepositoryTool,
-        saveKnowledgeTool,
-        getAllKnowledgeTool,
-        getMemoryStatsTool,
-        ingestToLongTermMemoryTool,
-        searchMemoryTool,
-        getConversationHistoryTool,
-        conversationContextTool
-    ];
-
-    private static cachedTools: any[] | null = null;
+    private static tools: any[] | null = null;
 
     /**
      * returns an array of all registered tools.
      */
     static getTools() {
-        if (!this.cachedTools) {
-            this.cachedTools = this.tools.filter(Boolean);
+        if (!this.tools) {
+            this.tools = [
+                webSearchTool,
+                localFileSystemTool,
+                writeSandboxFileTool,
+                currentTimeTool,
+                updateUserProfileTool,
+                runSandboxCodeTool,
+                synthesizeSkillTool,
+                visualizeArchitectureTool,
+                ingestKnowledgeTool,
+                generateDataChartTool,
+                runSystemAuditTool,
+                generateProjectManualTool,
+                manageProjectGoalsTool,
+                scrapeWebsiteTool,
+                delegateTaskTool,
+                sendEmailReportTool,
+                manageScheduledTasksTool,
+                manageGitRepositoryTool,
+                saveKnowledgeTool,
+                getAllKnowledgeTool,
+                getMemoryStatsTool,
+                ingestToLongTermMemoryTool,
+                searchMemoryTool,
+                getConversationHistoryTool,
+                conversationContextTool
+            ].filter(Boolean);
         }
-        return this.cachedTools;
+        return this.tools;
     }
 
     /**
      * Dynamically register a new tool at runtime.
      */
     static registerTool(tool: any) {
+        const tools = this.getTools();
         if (!this.getToolByName(tool.name)) {
-            this.tools.push(tool);
-            this.cachedTools = null;
+            tools.push(tool);
             return true;
         }
         return false;
@@ -87,10 +85,10 @@ export class SkillRegistry {
      * Unregisters a tool by name (used for cleanup or runtime dynamic unloading).
      */
     static unregisterTool(name: string): boolean {
-        const idx = this.tools.findIndex(t => t.name === name);
+        const tools = this.getTools();
+        const idx = tools.findIndex(t => t.name === name);
         if (idx !== -1) {
-            this.tools.splice(idx, 1);
-            this.cachedTools = null;
+            tools.splice(idx, 1);
             return true;
         }
         return false;

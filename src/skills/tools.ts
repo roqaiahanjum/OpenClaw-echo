@@ -852,24 +852,27 @@ export const searchMemoryTool = tool(
 );
 
 export const getConversationHistoryTool = tool(
-    async ({ chatId, filter, limit }: { chatId?: string; filter?: "questions_only" | "all_messages"; limit?: number } = {}) => {
+    async ({ chatId, filter, limit, offset }: { chatId?: string; filter?: "questions_only" | "all_messages"; limit?: number; offset?: number } = {}) => {
         try {
             const cid = chatId || "default";
             const lim = limit || 5;
+            const off = offset || 0;
             if (filter === "questions_only") {
-                const qs = await memory.getRecentQuestions(cid, lim);
+                const qs = await memory.getRecentQuestions(cid, lim, undefined, off);
                 if (qs.length === 0) return "No previous questions recorded in conversation history.";
                 return JSON.stringify({
                     type: "questions",
                     count: qs.length,
+                    offset: off,
                     items: qs
                 }, null, 2);
             }
-            const msgs = await memory.getRecentMessages(cid, lim);
+            const msgs = await memory.getRecentMessages(cid, lim, off);
             if (msgs.length === 0) return "No previous messages recorded in conversation history.";
             return JSON.stringify({
                 type: "all_messages",
                 count: msgs.length,
+                offset: off,
                 items: msgs
             }, null, 2);
         } catch (error: any) {
@@ -878,11 +881,12 @@ export const getConversationHistoryTool = tool(
     },
     {
         name: "get_conversation_history",
-        description: "Retrieves recent conversation history (questions or all messages) in chronological order for a specific chat ID.",
+        description: "Retrieves recent conversation history (questions or all messages) in chronological order for a specific chat ID with optional offset.",
         schema: z.object({
             chatId: z.string().optional().describe("Optional user or chat ID for scoped history retrieval"),
             filter: z.enum(["questions_only", "all_messages"]).optional().describe("Filter by 'questions_only' or 'all_messages' (default: all_messages)"),
-            limit: z.number().optional().describe("Maximum number of interactions to retrieve (default: 5)")
+            limit: z.number().optional().describe("Maximum number of interactions to retrieve (default: 5)"),
+            offset: z.number().optional().describe("Number of interactions to skip for pagination or prior questions (default: 0)")
         })
     }
 );
@@ -1324,10 +1328,30 @@ export const delegateTaskTool = tool(
 );
 
 export const sendEmailReportTool = tool(
-    async ({ to, subject, body }: { to: string; subject: string; body: string }) => {
+    async ({ to, subject, body }: { to?: string; subject?: string; body?: string }) => {
+        // Validation for missing fields: ask user for missing fields instead of guessing
+        const missingFields: string[] = [];
+        if (!to || !to.trim()) missingFields.push("recipient email address ('to')");
+        if (!subject || !subject.trim()) missingFields.push("subject line ('subject')");
+        if (!body || !body.trim()) missingFields.push("email message body ('body')");
+
+        if (missingFields.length > 0) {
+            return `Cannot send email: missing required field(s): ${missingFields.join(", ")}. Please provide the ${missingFields.join(" and ")} to proceed.`;
+        }
+
+        const recipient = to!.trim();
+        const emailSubject = subject!.trim();
+        const emailBody = body!.trim();
+
         try {
-            await Diplomat.sendReport({ to, subject, body });
-            return `Email sent successfully to ${to} with subject "${subject}".`;
+            const res = await Diplomat.sendReport({ to: recipient, subject: emailSubject, body: emailBody });
+            if (res.success && res.accepted.some(a => a.toLowerCase().includes(recipient.toLowerCase()) || recipient.toLowerCase().includes(a.toLowerCase()))) {
+                return `Email sent successfully to ${recipient} with subject "${emailSubject}". MessageId: ${res.messageId || 'confirmed'}.`;
+            } else if (res.rejected.length > 0) {
+                return `Failed to send email: recipient ${recipient} was rejected by SMTP server.`;
+            } else {
+                return `Email delivery unconfirmed: server did not accept recipient ${recipient}. Accepted: [${res.accepted.join(", ")}].`;
+            }
         } catch (error: any) {
             const rawMsg = error.message || String(error);
             const pass = process.env.SMTP_PASS || "";
@@ -1335,17 +1359,17 @@ export const sendEmailReportTool = tool(
             let safeMsg = rawMsg;
             if (pass.length > 0) safeMsg = safeMsg.split(pass).join("*****");
             if (cleanPass.length > 0) safeMsg = safeMsg.split(cleanPass).join("*****");
-            console.error(`[send_email_report] Error sending email to ${to}: ${safeMsg}`);
-            return `Failed to send email report to ${to}: ${safeMsg}`;
+            console.error(`[send_email_report] Error sending email to ${recipient}: ${safeMsg}`);
+            return `Failed to send email report to ${recipient}: ${safeMsg}`;
         }
     },
     {
         name: "send_email_report",
-        description: "Sends email reports via SMTP.",
+        description: "Sends email reports via SMTP. Validates recipient, subject, and body.",
         schema: z.object({
-            to: z.string().email().describe("Recipient email address"),
-            subject: z.string().describe("Subject of the email"),
-            body: z.string().describe("Body content of the email report")
+            to: z.string().optional().describe("Recipient email address"),
+            subject: z.string().optional().describe("Subject of the email"),
+            body: z.string().optional().describe("Body content of the email report")
         })
     }
 );

@@ -72,6 +72,10 @@ export class MemoryManager {
         });
     }
 
+    public setCustomDb(customDb?: IDatabaseConnection): void {
+        this.customDb = customDb;
+    }
+
     public static getInstance(): MemoryManager {
         if (!MemoryManager.instance) {
             MemoryManager.instance = new MemoryManager();
@@ -104,9 +108,12 @@ export class MemoryManager {
                 `, (err) => { if (err) reject(err); });
 
                 this.db.all(`PRAGMA table_info(interactions)`, (err, rows: any[]) => {
-                    const hasChatId = (rows || []).some((r: any) => r.name === 'chat_id');
-                    if (!hasChatId) {
+                    const colNames = (rows || []).map((r: any) => r.name);
+                    if (!colNames.includes('chat_id')) {
                         this.db.run(`ALTER TABLE interactions ADD COLUMN chat_id TEXT DEFAULT 'default'`, () => { });
+                    }
+                    if (!colNames.includes('is_meta')) {
+                        this.db.run(`ALTER TABLE interactions ADD COLUMN is_meta INTEGER DEFAULT 0`, () => { });
                     }
                 });
 
@@ -491,21 +498,22 @@ export class MemoryManager {
     public async getRecentQuestions(
         chatId: string = "default",
         limit: number = 5,
-        excludeId?: string
+        excludeId?: string,
+        offset: number = 0
     ): Promise<Array<{ id: string; question: string; answer: string; timestamp: string }>> {
         await this.initialize().catch(() => {});
         return new Promise((resolve) => {
-            const sql = `SELECT id, user_msg, agent_res, timestamp FROM interactions WHERE chat_id = ? ORDER BY timestamp DESC, id DESC, rowid DESC LIMIT 200`;
+            const sql = `SELECT id, user_msg, agent_res, timestamp FROM interactions WHERE chat_id = ? AND (is_meta IS NULL OR is_meta = 0) ORDER BY timestamp DESC, rowid DESC LIMIT 200`;
             this.db.all(sql, [chatId], (err, rows: any[]) => {
                 if (err || !rows) return resolve([]);
-                const questions = rows.filter(r => r && r.user_msg && r.id !== excludeId && this.isQuestion(r.user_msg) && !this.isHistoryMetaQuestion(r.user_msg));
-                const slice = questions.slice(0, limit);
+                const questions = rows.filter(r => r && r.user_msg && r.id !== excludeId && this.isQuestion(r.user_msg));
+                const slice = questions.slice(offset, offset + limit);
                 // Return in chronological order (oldest to newest)
                 resolve(slice.reverse().map(r => ({
                     id: r.id,
                     question: r.user_msg,
                     answer: r.agent_res,
-                    timestamp: r.timestamp
+                    timestamp: new Date(r.timestamp).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })
                 })));
             });
         });
@@ -513,19 +521,20 @@ export class MemoryManager {
 
     public async getRecentMessages(
         chatId: string = "default",
-        limit: number = 5
+        limit: number = 5,
+        offset: number = 0
     ): Promise<Array<{ id: string; message: string; response: string; timestamp: string }>> {
         await this.initialize().catch(() => {});
         return new Promise((resolve) => {
-            const sql = `SELECT id, user_msg, agent_res, timestamp FROM interactions WHERE chat_id = ? ORDER BY timestamp DESC, id DESC, rowid DESC LIMIT ?`;
-            this.db.all(sql, [chatId, limit], (err, rows: any[]) => {
+            const sql = `SELECT id, user_msg, agent_res, timestamp FROM interactions WHERE chat_id = ? AND (is_meta IS NULL OR is_meta = 0) ORDER BY timestamp DESC, rowid DESC LIMIT ? OFFSET ?`;
+            this.db.all(sql, [chatId, limit, offset], (err, rows: any[]) => {
                 if (err || !rows) return resolve([]);
                 // Return in chronological order (oldest to newest)
                 resolve(rows.reverse().map(r => ({
                     id: r.id,
                     message: r.user_msg,
                     response: r.agent_res,
-                    timestamp: r.timestamp
+                    timestamp: new Date(r.timestamp).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })
                 })));
             });
         });
@@ -863,14 +872,15 @@ export class MemoryManager {
         });
     }
 
-    public async addInteraction(userInput: string, agentResponse: string, chatId: string = "default"): Promise<void> {
+    public async addInteraction(userInput: string, agentResponse: string, chatId: string = "default", isMeta: boolean = false): Promise<void> {
         await this.initialize().catch(() => { });
         const id = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+        const metaVal = isMeta ? 1 : 0;
 
         return new Promise((resolve, reject) => {
             this.db.run(
-                "INSERT INTO interactions (id, chat_id, user_msg, agent_res) VALUES (?, ?, ?, ?)",
-                [id, chatId, userInput, agentResponse],
+                "INSERT INTO interactions (id, chat_id, user_msg, agent_res, is_meta) VALUES (?, ?, ?, ?, ?)",
+                [id, chatId, userInput, agentResponse, metaVal],
                 async (err) => {
                     if (err) {
                         console.error("[Memory] Add Interaction Error:", err.message);

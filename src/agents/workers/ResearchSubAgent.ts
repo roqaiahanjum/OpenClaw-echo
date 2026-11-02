@@ -29,7 +29,9 @@ export class ResearchSubAgent implements WorkerAgent {
                     webResults = String(await webSearchTool.invoke({ query: searchQuery }));
                     const isErrorSnippet = webResults.includes("Warning: TAVILY_API_KEY") || 
                                            webResults.includes("Web search error:") || 
-                                           webResults.includes("is not configured");
+                                           webResults.includes("is not configured") ||
+                                           webResults.toLowerCase().includes("error") ||
+                                           webResults.includes("returned status ");
                     toolSuccess = !isErrorSnippet && !webResults.toLowerCase().includes("fatal") && webResults.length > 50;
                 } catch (e: any) {
                     webResults = `Web search error: ${e.message}`;
@@ -99,7 +101,11 @@ Provide a clear, structured research summary in 3-4 concise bullet points with c
                 toolOutput: webResults,
                 verified: toolSuccess,
                 verificationReason: toolSuccess ? "Web search results gathered and synthesized" : "Web search API unavailable or returned empty result",
-                resultData: toolSuccess ? `### Research Synthesis\n\n${synthesis.trim()}` : `⚠️ [ResearchSubAgent Tool Unavailable]: Live web search could not be executed because search API is unconfigured or unreachable. Tool output: ${webResults}`,
+                resultData: toolSuccess 
+                    ? `### Research Synthesis\n\n${synthesis.trim()}` 
+                    : (webResults && webResults.toLowerCase().includes("error") 
+                        ? `⚠️ [ResearchSubAgent Execution Error]: Search tool returned an error: ${webResults}` 
+                        : `No live web search results found for this query.`),
                 error: toolSuccess ? undefined : webResults,
                 executionTimeMs
             };

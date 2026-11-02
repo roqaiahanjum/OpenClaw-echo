@@ -102,9 +102,22 @@ const GENERAL_TOOL_PATTERNS = [
 /**
  * Classifies an incoming user prompt into an actionable intent decision with mandatory subagent routing.
  */
-export function classifyUserIntent(input: string): IntentDecision {
+export function classifyUserIntent(input: string, contextTurns?: Array<{ user: string; bot?: string } | string>): IntentDecision {
     const trimmed = input.trim();
-    const lower = trimmed.toLowerCase();
+    let lower = trimmed.toLowerCase();
+
+    // If context turns provided, combine for follow-up intent inheritance
+    if (contextTurns && Array.isArray(contextTurns) && contextTurns.length > 0) {
+        const historyText = contextTurns.map(t => typeof t === "string" ? t : `${t.user || ""} ${t.bot || ""}`).join(" ").toLowerCase();
+        // Check if follow-up inherits email, browser, coding, or research intent
+        if ((lower.includes("send") || lower.includes("to") || lower.includes("@") || lower.includes("mail")) && (historyText.includes("email") || historyText.includes("smtp") || historyText.includes("report"))) {
+            lower = `${lower} send email`;
+        }
+        // Check if follow-up inherits conversation/question history intent
+        if ((lower.includes("before") || lower.includes("prior") || lower.includes("earlier") || lower.includes("that") || lower.includes("one")) && (historyText.includes("question") || historyText.includes("asked") || historyText.includes("last"))) {
+            lower = `${lower} previous question`;
+        }
+    }
 
     if (!trimmed) {
         return {
@@ -206,26 +219,50 @@ export function classifyUserIntent(input: string): IntentDecision {
         };
     }
 
-    // Subsystem Tools (Goals, Git, Clockwork, Email)
-    if (GENERAL_TOOL_PATTERNS.some(p => p.test(lower))) {
+    // Subsystem Tools: Route directly to the owning agent
+    // 1. Email actions must route to research/conversational tool pipeline with send_email_report rather than MemorySubAgent
+    if (/\b(send\s+(?:an?\s+|the\s+|me\s+an?\s+)?(?:email|mail)|email\s+to|mail\s+to|smtp|send_email|email\s+report|send\s+(?:it\s+)?to\s+[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\b/i.test(lower) || (lower.includes("@") && lower.includes("send"))) {
         return {
             intent: "GENERAL_TOOL",
-            primaryAgent: "memory",
-            reason: "Input targets specialized subsystem tool; routing via Memory/Tool pipeline.",
-            targetAgents: ["memory"],
+            primaryAgent: "conversation", // Runs toolSelector pipeline which loads send_email_report
+            reason: "Email action detected; routing to autonomous tool execution pipeline with send_email_report.",
+            targetAgents: ["conversation"],
             confidence: 0.95
         };
     }
 
-    // Informational question (e.g. "What is TypeScript?", "Explain how neural networks work")
+    if (GENERAL_TOOL_PATTERNS.some(p => p.test(lower))) {
+        return {
+            intent: "GENERAL_TOOL",
+            primaryAgent: "conversation",
+            reason: "Subsystem tool requested; routing via autonomous tool execution pipeline.",
+            targetAgents: ["conversation"],
+            confidence: 0.95
+        };
+    }
+
+    // Informational questions:
+    // User personal/saved facts (with "my", "i", "save", "remember") were already caught in EXPLICIT_MEMORY_PATTERNS above.
+    // General-knowledge or external entity queries (e.g. "who is the founder of omni-ide?", "what is the capital of Japan?")
+    // must be routed to research with web_search/knowledge graph for grounded factual answers.
     const isGeneralQuestion = /^(?:what|why|how|who|when|where|explain|can you explain|define|tell me about)\b/i.test(trimmed);
     if (isGeneralQuestion && !actualCodeIntent && !hasBrowserIntent) {
+        const isPersonalFactQuery = /\b(my|i|me|we|our|saved|remember|history)\b/i.test(lower);
+        if (isPersonalFactQuery) {
+            return {
+                intent: "MEMORY_ONLY",
+                primaryAgent: "memory",
+                reason: "Personal fact/memory query routed to MemorySubAgent.",
+                targetAgents: ["memory"],
+                confidence: 0.92
+            };
+        }
         return {
-            intent: "CONVERSATION",
-            primaryAgent: "conversation",
-            reason: "General informational question routed to ConversationSubAgent with get_conversation_context tool.",
-            targetAgents: ["conversation"],
-            confidence: 0.90
+            intent: "RESEARCH_ONLY",
+            primaryAgent: "research",
+            reason: "General knowledge or entity inquiry routed to ResearchSubAgent with web_search.",
+            targetAgents: ["research"],
+            confidence: 0.92
         };
     }
 
