@@ -72,7 +72,7 @@ export class ProjectAnalyzer {
         };
 
         // 1. Connectivity Check (Environment)
-        const hasGemini = !!process.env.GOOGLE_API_KEY;
+        const hasGemini = !!(process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || process.env.GEMINI_KEY);
         addCheck("Gemini Bridge Key", hasGemini ? "pass" : "fail", hasGemini ? "Key detected" : "API key missing", 25);
 
         const hasTelegram = !!process.env.TELEGRAM_TOKEN;

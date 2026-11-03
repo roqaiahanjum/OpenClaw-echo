@@ -47,7 +47,7 @@ export class HealthCheckManager {
 
         // 5. Groq / Gemini Router
         const groqKey = process.env.GROQ_API_KEY;
-        const geminiKey = process.env.GEMINI_API_KEY;
+        const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GEMINI_KEY;
         results.push({
             service: "ai_router",
             status: (groqKey || geminiKey) ? "OK" : "FAIL",
