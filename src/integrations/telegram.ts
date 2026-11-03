@@ -19,6 +19,7 @@ import { ACPTask } from "../agents/types";
 import { verifyStepResult } from "../core/verifier";
 import { determineRecoveryStrategy } from "../core/recovery";
 import { localVerifyToolResult } from "../core/localVerifier";
+import { validateResponseHonesty } from "../core/toolHonestyGuard";
 import { isSimpleConversation } from "../core/conversationGuard";
 import { ToolSelector } from "../core/toolSelector";
 import { AuthManager } from "../core/auth";
@@ -412,7 +413,9 @@ export const executeAutonomousFlow = async (input: string, chatId?: string | num
         }
 
         // 6. CONVERSATION PIPELINE (ConversationSubAgent with mandatory get_conversation_context tool)
-        if (!isPhoto && (intentDecision.primaryAgent === "conversation" || intentDecision.intent === "CONVERSATION")) {
+        // Strictly handles pure conversational greetings and persona inquiries.
+        // General subsystem tools (e.g. email, goals, git, clockwork) proceed to autonomous execution.
+        if (!isPhoto && intentDecision.intent === "CONVERSATION") {
             if (progressFn) await progressFn("💬 _Retrieving conversation context and local knowledge..._").catch(() => {});
             const convTask: ACPTask = {
                 taskId: `task_conv_${Date.now()}`,
@@ -489,6 +492,7 @@ Context: ${context}`;
         const MAX_ITERATIONS = 8;
         let recoveryAttempts = 0;
         const MAX_RECOVERY_ATTEMPTS = 2;
+        const executedToolCalls: Array<{ name: string; args: any; output: string }> = [];
 
         while (iterations < MAX_ITERATIONS) {
             if (parentSignal?.aborted) {
@@ -544,6 +548,7 @@ Context: ${context}`;
                             console.error(`[Tool Error] Failed to execute ${toolCall.name}:`, toolErr);
                         }
                         const toolDuration = Date.now() - toolStart;
+                        executedToolCalls.push({ name: toolCall.name, args: toolCall.args, output: String(output) });
                         if (requestId) {
                             console.log(`[StructuredLog] [RequestId:${requestId}] [Event:ToolResult] [Tool:${toolCall.name}] [DurationMs:${toolDuration}]`);
                         }
@@ -641,6 +646,19 @@ Context: ${context}`;
         if (!finalResponse || finalResponse.trim() === "") {
             finalResponse = "I processed your request but wasn't able to generate a complete response. Please try rephrasing or breaking it into smaller steps.";
         }
+
+        // ◄── TOOL RESULT HONESTY GUARD ──►
+        // Enforces that success is never claimed if an action was requested but never executed or failed.
+        const honestyCheck = validateResponseHonesty({
+            userInput: input,
+            executedToolCalls,
+            llmResponse: finalResponse
+        });
+        if (!honestyCheck.honest) {
+            console.warn(`[ToolHonestyGuard] Intercepted false success claim: ${honestyCheck.reason}`);
+            finalResponse = honestyCheck.sanitizedResponse;
+        }
+
         if (parentSignal?.aborted) throw new Error("FLOW_ABORTED");
         await safeReply(finalResponse);
 

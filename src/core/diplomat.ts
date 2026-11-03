@@ -1,10 +1,20 @@
 import * as nodemailer from "nodemailer";
 
+export type SmtpOutcome =
+    | "TOOL_NOT_INVOKED"
+    | "CONNECTION_FAILED"
+    | "AUTH_FAILED"
+    | "SERVER_REJECTED"
+    | "SERVER_ACCEPTED_DELIVERY_UNCONFIRMED"
+    | "DELIVERY_CONFIRMED";
+
 export interface SendReportResult {
     success: boolean;
+    outcome: SmtpOutcome;
     accepted: string[];
     rejected: string[];
     messageId?: string;
+    details?: string;
     error?: string;
 }
 
@@ -27,22 +37,32 @@ export class Diplomat {
         // Strip any accidental whitespace or wrapping quotes from the password string.
         const cleanPass = pass.replace(/\s+/g, "").replace(/^['"]|['"]$/g, "");
 
-        if (host.includes("gmail")) {
-            return nodemailer.createTransport({
-                service: "gmail",
-                auth: { user, pass: cleanPass }
-            });
-        }
-
-        return nodemailer.createTransport({
+        // If port is 587 (STARTTLS), connect via standard SMTP options with timeouts
+        // Render Free Tier blocks port 25, while port 587 requires STARTTLS.
+        const baseOptions: nodemailer.TransportOptions = {
             host,
             port,
             secure: port === 465,
             auth: { user, pass: cleanPass },
+            connectionTimeout: 10000, // 10s timeout to fail fast on blocked outbound ports
+            greetingTimeout: 10000,
+            socketTimeout: 15000,
             tls: {
                 rejectUnauthorized: true
             }
-        });
+        } as any;
+
+        if (host.includes("gmail") && port === 465) {
+            return nodemailer.createTransport({
+                service: "gmail",
+                auth: { user, pass: cleanPass },
+                connectionTimeout: 10000,
+                greetingTimeout: 10000,
+                socketTimeout: 15000
+            } as any);
+        }
+
+        return nodemailer.createTransport(baseOptions);
     }
 
     static async sendReport(options: {
@@ -51,6 +71,19 @@ export class Diplomat {
         body: string;
         agentName?: string;
     }): Promise<SendReportResult> {
+        const target = (options.to || "").trim();
+        // RFC 5322 standard recipient email format validation
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(target)) {
+            return {
+                success: false,
+                outcome: "SERVER_REJECTED",
+                accepted: [],
+                rejected: [target],
+                error: `Invalid recipient email address format: '${target}'`
+            };
+        }
+
         const transporter = this.createTransporter();
         const from = process.env.SMTP_FROM || process.env.SMTP_USER;
         const agentName = options.agentName || "OpenClaw Echo";
@@ -87,26 +120,57 @@ export class Diplomat {
 </body>
 </html>`;
 
-        const info = await transporter.sendMail({
-            from: `"${agentName}" <${from}>`,
-            to: options.to,
-            subject: options.subject,
-            html: htmlBody,
-            text: options.body
-        });
+        try {
+            const info = await transporter.sendMail({
+                from: `"${agentName}" <${from}>`,
+                to: target,
+                subject: options.subject,
+                html: htmlBody,
+                text: options.body
+            });
 
-        const accepted = Array.isArray(info?.accepted) ? info.accepted.map(String) : [];
-        const rejected = Array.isArray(info?.rejected) ? info.rejected.map(String) : [];
-        const target = options.to.toLowerCase().trim();
-        const isAccepted = accepted.some(addr => addr.toLowerCase().includes(target) || target.includes(addr.toLowerCase()));
+            const accepted = Array.isArray(info?.accepted) ? info.accepted.map(String) : [];
+            const rejected = Array.isArray(info?.rejected) ? info.rejected.map(String) : [];
+            const isAccepted = accepted.some(addr => addr.toLowerCase().includes(target.toLowerCase()) || target.toLowerCase().includes(addr.toLowerCase()));
 
-        console.log(`[Diplomat] Email report send attempt to: ${options.to}. Accepted: ${accepted.join(",")}, Rejected: ${rejected.join(",")}`);
+            console.log(`[Diplomat] Email report send attempt to: ${target}. Accepted: ${accepted.join(",")}, Rejected: ${rejected.join(",")}`);
 
-        return {
-            success: isAccepted,
-            accepted,
-            rejected,
-            messageId: info?.messageId
-        };
+            if (isAccepted) {
+                return {
+                    success: true,
+                    outcome: "SERVER_ACCEPTED_DELIVERY_UNCONFIRMED",
+                    accepted,
+                    rejected,
+                    messageId: info?.messageId,
+                    details: `SMTP server accepted message for onward relay to ${target} (Message-ID: ${info?.messageId || "generated"}). Note: SMTP protocol confirms relay acceptance; inbox delivery is unconfirmed.`
+                };
+            }
+
+            return {
+                success: false,
+                outcome: "SERVER_REJECTED",
+                accepted,
+                rejected: rejected.length > 0 ? rejected : [target],
+                details: `Recipient ${target} was not accepted by SMTP relay server.`
+            };
+        } catch (sendErr: any) {
+            const code = (sendErr.code || "").toUpperCase();
+            const rawMsg = sendErr.message || String(sendErr);
+
+            let outcome: SmtpOutcome = "SERVER_REJECTED";
+            if (code === "EAUTH" || sendErr.responseCode === 535) {
+                outcome = "AUTH_FAILED";
+            } else if (code === "ECONNREFUSED" || code === "ETIMEDOUT" || code === "ENOTFOUND" || rawMsg.includes("timeout")) {
+                outcome = "CONNECTION_FAILED";
+            }
+
+            return {
+                success: false,
+                outcome,
+                accepted: [],
+                rejected: [target],
+                error: rawMsg
+            };
+        }
     }
 }

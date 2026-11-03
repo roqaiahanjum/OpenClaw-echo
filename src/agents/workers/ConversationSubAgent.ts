@@ -2,6 +2,7 @@ import { ACPTask, ACPResult, WorkerAgent } from "../types";
 import { SkillRegistry } from "../../skills/registry";
 import { ModelRouter } from "../../core/router";
 import { SystemMessage, HumanMessage } from "@langchain/core/messages";
+import { ToolExecutionContract } from "../../core/toolExecutionContract";
 
 /**
  * ConversationSubAgent
@@ -16,6 +17,20 @@ export class ConversationSubAgent implements WorkerAgent {
     public async execute(task: ACPTask): Promise<ACPResult> {
         const startTime = Date.now();
         console.log(`[ConversationSubAgent] Executing task ${task.taskId}: "${task.taskDescription}"`);
+
+        // 0. Routing Contract Guard: Prevent silent bypass of tools
+        const toolCheck = ToolExecutionContract.inspectRequiredTool(task.taskDescription);
+        if (toolCheck.requiresTool && toolCheck.targetAgent && toolCheck.targetAgent !== "conversation") {
+            console.log(`[ConversationSubAgent] [ContractGuard] Re-routing tool request to '${toolCheck.targetAgent}': "${task.taskDescription}"`);
+            const { SubAgentManager } = await import("../SubAgentManager");
+            const worker = SubAgentManager.getInstance().getWorker(toolCheck.targetAgent as any);
+            if (worker) {
+                return await worker.execute({
+                    ...task,
+                    targetAgent: toolCheck.targetAgent as any
+                });
+            }
+        }
 
         try {
             // 1. Mandatory Tool Invocation: get_conversation_context

@@ -53,6 +53,9 @@ async function bootstrap() {
         ensureStorageDirectories();
         console.log(`[Storage] Storage directories verified (DB: ${SQLITE_DB_PATH}, Sandbox: ${SANDBOX_DIR})`);
 
+        const { StartupValidator } = await import("./core/startupValidator");
+        await StartupValidator.printStartupReport();
+
         const { startServer, stopServer } = await import("./integrations/telegram");
         const server = await startServer();
         console.log("[System] System Online - Cloud Deployment Ready (Render / Railway / Local)");

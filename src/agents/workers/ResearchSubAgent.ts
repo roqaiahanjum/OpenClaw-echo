@@ -4,6 +4,7 @@ import { SkillRegistry } from "../../skills/registry";
 import { KnowledgeGraphManager } from "../../memory/KnowledgeGraphManager";
 import { ModelRouter } from "../../core/router";
 import { SystemMessage, HumanMessage } from "@langchain/core/messages";
+import { ToolExecutionContract } from "../../core/toolExecutionContract";
 
 export class ResearchSubAgent implements WorkerAgent {
     public readonly agentType = "research" as const;
@@ -18,27 +19,30 @@ export class ResearchSubAgent implements WorkerAgent {
             const toolStart = Date.now();
 
             let searchQuery = task.taskDescription;
-            const qMatch = task.taskDescription.match(/research\s+(?:the\s+)?([^,.;]+)/i);
-            if (qMatch && qMatch[1]) {
+            const qMatch = task.taskDescription.match(/(?:search(?:\s+the\s+(?:web|internet)|online)?(?:\s+for)?|research(?:\s+into|\s+on|\s+about|\s+the)?|look\s+up|find\s+information\s+(?:on|about)?)\s+([^,.;\n]+?)(?:\s+(?:and\s+provide|and\s+tell|and\s+give|and\s+include|do\s+not|please\s+|with\s+sources|citing)|\.|$)/i);
+            if (qMatch && qMatch[1] && qMatch[1].trim().length > 3) {
                 searchQuery = qMatch[1].trim();
             }
 
             const webSearchTool = SkillRegistry.getToolByName("web_search");
+            let isErrorSnippet = false;
             if (webSearchTool) {
                 try {
                     webResults = String(await webSearchTool.invoke({ query: searchQuery }));
-                    const isErrorSnippet = webResults.includes("Warning: TAVILY_API_KEY") || 
-                                           webResults.includes("Web search error:") || 
-                                           webResults.includes("is not configured") ||
-                                           webResults.toLowerCase().includes("error") ||
-                                           webResults.includes("returned status ");
+                    isErrorSnippet = webResults.includes("Warning: TAVILY_API_KEY") || 
+                                     webResults.includes("Web search error:") || 
+                                     webResults.includes("is not configured") ||
+                                     webResults.includes("Web search service returned status ") ||
+                                     webResults.includes("Web search timed out");
                     toolSuccess = !isErrorSnippet && !webResults.toLowerCase().includes("fatal") && webResults.length > 50;
                 } catch (e: any) {
                     webResults = `Web search error: ${e.message}`;
+                    isErrorSnippet = true;
                     toolSuccess = false;
                 }
             } else {
                 webResults = "web_search tool is not registered in registry.";
+                isErrorSnippet = true;
                 toolSuccess = false;
             }
 
@@ -64,14 +68,20 @@ export class ResearchSubAgent implements WorkerAgent {
             const router = ModelRouter.getInstance();
             if (!router.isInFallbackMode() && toolSuccess) {
                 try {
-                    const prompt = `You are ResearchSubAgent. Synthesize the findings for the research query: "${searchQuery}".
-Web Search Results:
+                    const prompt = `You are ResearchSubAgent. Synthesize the factual findings for the research query: "${searchQuery}".
+
+Verified Web Search Results:
 ${webResults}
 
 Knowledge Graph Context:
 ${graphResults}
 
-Provide a clear, structured research summary in 3-4 concise bullet points with cited sources.`;
+STRICT REQUIREMENTS:
+1. Provide a clear, structured research summary answering the user's request.
+2. Ground your answer strictly in the Verified Web Search Results above.
+3. Include the exact source URLs and citations from the Web Search Results (e.g. [Title](URL)).
+4. DO NOT invent or hallucinate citations, URLs, dates, or names not present in the search results.
+5. If the search results do not contain a specific requested detail, explicitly state that it was not found in the search results rather than fabricating an answer.`;
 
                     const timeoutPromise = new Promise((_, reject) =>
                         setTimeout(() => reject(new Error('RESEARCH_TIMEOUT')), 25000)
@@ -93,6 +103,16 @@ Provide a clear, structured research summary in 3-4 concise bullet points with c
             }
 
             const executionTimeMs = Date.now() - startTime;
+            ToolExecutionContract.logExecution({
+                requestId: task.taskId,
+                selectedAgent: this.agentType,
+                selectedTool: "web_search",
+                executionStatus: toolSuccess ? "SUCCESS" : "FAILED",
+                durationMs: executionTimeMs,
+                errorCategory: toolSuccess ? "NONE" : ToolExecutionContract.categorizeError(webResults),
+                details: toolSuccess ? `Synthesized ${synthesis.length} chars` : webResults
+            });
+
             return {
                 taskId: task.taskId,
                 targetAgent: this.agentType,
@@ -103,7 +123,7 @@ Provide a clear, structured research summary in 3-4 concise bullet points with c
                 verificationReason: toolSuccess ? "Web search results gathered and synthesized" : "Web search API unavailable or returned empty result",
                 resultData: toolSuccess 
                     ? `### Research Synthesis\n\n${synthesis.trim()}` 
-                    : (webResults && webResults.toLowerCase().includes("error") 
+                    : (isErrorSnippet
                         ? `⚠️ [ResearchSubAgent Execution Error]: Search tool returned an error: ${webResults}` 
                         : `No live web search results found for this query.`),
                 error: toolSuccess ? undefined : webResults,

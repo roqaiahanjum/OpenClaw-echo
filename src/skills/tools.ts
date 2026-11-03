@@ -1346,11 +1346,17 @@ export const sendEmailReportTool = tool(
         try {
             const res = await Diplomat.sendReport({ to: recipient, subject: emailSubject, body: emailBody });
             if (res.success && res.accepted.some(a => a.toLowerCase().includes(recipient.toLowerCase()) || recipient.toLowerCase().includes(a.toLowerCase()))) {
-                return `Email sent successfully to ${recipient} with subject "${emailSubject}". MessageId: ${res.messageId || 'confirmed'}.`;
-            } else if (res.rejected.length > 0) {
-                return `Failed to send email: recipient ${recipient} was rejected by SMTP server.`;
+                return `Email sent successfully to ${recipient} with subject "${emailSubject}". MessageId: ${res.messageId || 'confirmed'}. [Outcome: ${res.outcome}].`;
+            } else if (res.error) {
+                return `Failed to send email report to ${recipient}: ${res.error}. [Outcome: ${res.outcome}].`;
+            } else if (res.rejected.length > 0 || res.outcome === "SERVER_REJECTED") {
+                return `Failed to send email: recipient ${recipient} was rejected by SMTP server. [Outcome: ${res.outcome}].`;
+            } else if (res.outcome === "AUTH_FAILED") {
+                return `Failed to send email: SMTP authentication failed. Please verify SMTP_USER and SMTP_PASS. [Outcome: AUTH_FAILED].`;
+            } else if (res.outcome === "CONNECTION_FAILED") {
+                return `Failed to send email: Unable to connect to SMTP host. Connection timed out or port blocked. [Outcome: CONNECTION_FAILED].`;
             } else {
-                return `Email delivery unconfirmed: server did not accept recipient ${recipient}. Accepted: [${res.accepted.join(", ")}].`;
+                return `Email delivery unconfirmed: server did not accept recipient ${recipient}. Accepted: [${res.accepted.join(", ")}]. [Outcome: ${res.outcome}].`;
             }
         } catch (error: any) {
             const rawMsg = error.message || String(error);

@@ -54,7 +54,7 @@ export const EXPLICIT_BROWSER_PATTERNS = [
 export const EXPLICIT_RESEARCH_PATTERNS = [
     /\b(?:research(?:\s+(?:on|into|about|the|[a-zA-Z0-9_\-]+))|conduct\s+research|investigate|literature\s+on|survey\s+of|overview\s+of|scientific\s+study|clinical\s+study|case\s+study)\b/i,
     /\b(?:what\s+are\s+the\s+latest|latest\s+advancements|latest\s+news|recent\s+developments)\b/i,
-    /\b(?:find\s+information|look\s+up|search\s+for|search\s+latest)\b/i,
+    /\b(?:search(?:\s+(?:the\s+(?:web|internet)|online|google|bing))?(?:\s+for|\s+latest)?|find\s+information(?:\s+about|\s+on)?|look\s+up|web\s+search)\b/i,
     /\b(?:history\s+of|benefits\s+of|architecture\s+of|comparison\s+of)\b/i
 ];
 
@@ -91,7 +91,7 @@ const CONVERSATIONAL_PATTERNS = [
 
 // 6. General Tool Patterns (Goals, Email, Git, Clockwork)
 const GENERAL_TOOL_PATTERNS = [
-    /\b(?:my\s+goals?|list\s+goals?|add\s+goal|create\s+goal|milestones?)\b/i,
+    /\b(?:my\s+goals?|list\s+goals?|(?:add|create|update|complete|manage)\s+(?:a\s+|the\s+|new\s+)?(?:project\s+)?(?:goals?|milestones?)|project\s+goals?|milestones?)\b/i,
     /\b(?:user\s+profile|my\s+preferences)\b/i,
     /\b(?:send\s+(?:an?\s+|the\s+|me\s+an?\s+)?(?:email|mail)|email\s+to|mail\s+to|smtp|send_email|email\s+report|check\s+(?:the\s+)?(?:smtp|email))\b/i,
     /\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b/i,
