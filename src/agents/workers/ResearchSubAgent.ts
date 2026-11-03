@@ -6,6 +6,27 @@ import { ModelRouter } from "../../core/router";
 import { SystemMessage, HumanMessage } from "@langchain/core/messages";
 import { ToolExecutionContract } from "../../core/toolExecutionContract";
 
+interface VerifiedSource {
+    title: string;
+    url: string;
+}
+
+function parseVerifiedSources(text: string): VerifiedSource[] {
+    const sources: VerifiedSource[] = [];
+    const seenUrls = new Set<string>();
+    const linkRegex = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
+    let match;
+    while ((match = linkRegex.exec(text)) !== null) {
+        const title = match[1].trim();
+        const url = match[2].trim();
+        if (!seenUrls.has(url) && url !== "#") {
+            seenUrls.add(url);
+            sources.push({ title, url });
+        }
+    }
+    return sources;
+}
+
 export class ResearchSubAgent implements WorkerAgent {
     public readonly agentType = "research" as const;
 
@@ -19,7 +40,7 @@ export class ResearchSubAgent implements WorkerAgent {
             const toolStart = Date.now();
 
             let searchQuery = task.taskDescription;
-            const qMatch = task.taskDescription.match(/(?:search(?:\s+the\s+(?:web|internet)|online)?(?:\s+for)?|research(?:\s+into|\s+on|\s+about|\s+the)?|look\s+up|find\s+information\s+(?:on|about)?)\s+([^,.;\n]+?)(?:\s+(?:and\s+provide|and\s+tell|and\s+give|and\s+include|do\s+not|please\s+|with\s+sources|citing)|\.|$)/i);
+            const qMatch = task.taskDescription.match(/(?:re?search(?:\s+(?:the\s+)?(?:web|internet|online))?(?:\s+for|\s+about|\s+on|\s+into)?|look\s+up|find(?:\s+information)?(?:\s+on|\s+about)?|what\s+is|who\s+is|tell\s+me\s+about)\s+([^,.;\n]+?)(?:\s+(?:and\s+provide|and\s+tell|and\s+give|and\s+include|do\s+not|please\s+|with\s+sources|citing)|\.|$)/i);
             if (qMatch && qMatch[1] && qMatch[1].trim().length > 3) {
                 searchQuery = qMatch[1].trim();
             }
@@ -64,24 +85,35 @@ export class ResearchSubAgent implements WorkerAgent {
                 graphResults = "";
             }
 
+            const verifiedSources = parseVerifiedSources(webResults);
             let synthesis = "";
             const router = ModelRouter.getInstance();
+
             if (!router.isInFallbackMode() && toolSuccess) {
                 try {
-                    const prompt = `You are ResearchSubAgent. Synthesize the factual findings for the research query: "${searchQuery}".
+                    const allowedUrlList = verifiedSources.length > 0 
+                        ? verifiedSources.map(s => `- [${s.title}](${s.url})`).join("\n")
+                        : "None (Cite no external URLs)";
 
-Verified Web Search Results:
+                    const prompt = `You are ResearchSubAgent for OpenClaw Echo.
+Synthesize a structured, factual answer for the research query: "${searchQuery}".
+
+Verified Web Search Findings:
 ${webResults}
 
 Knowledge Graph Context:
 ${graphResults}
 
-STRICT REQUIREMENTS:
-1. Provide a clear, structured research summary answering the user's request.
-2. Ground your answer strictly in the Verified Web Search Results above.
-3. Include the exact source URLs and citations from the Web Search Results (e.g. [Title](URL)).
-4. DO NOT invent or hallucinate citations, URLs, dates, or names not present in the search results.
-5. If the search results do not contain a specific requested detail, explicitly state that it was not found in the search results rather than fabricating an answer.`;
+ALLOWED CITATIONS (You may ONLY cite URLs from this list):
+${allowedUrlList}
+
+CRITICAL GROUNDING RULES:
+1. Provide a clear, well-structured response answering the user's request.
+2. Ground your answer strictly in the Verified Web Search Findings above.
+3. DO NOT invent dates, announcements, versions, or events not present in the search findings.
+4. DO NOT invent or hallucinate citations or URLs. Any cited link MUST come from the ALLOWED CITATIONS list.
+5. If the search findings do not contain a requested detail, state clearly that it was not found in the search results rather than fabricating an answer.
+6. Avoid dangling citation numbers at the end of sentences.`;
 
                     const timeoutPromise = new Promise((_, reject) =>
                         setTimeout(() => reject(new Error('RESEARCH_TIMEOUT')), 25000)
@@ -89,7 +121,7 @@ STRICT REQUIREMENTS:
 
                     const response: any = await Promise.race([
                         router.invoke([
-                            new SystemMessage("You are a specialized research agent."),
+                            new SystemMessage("You are a specialized factual research agent."),
                             new HumanMessage(prompt)
                         ], "research_subagent"),
                         timeoutPromise
@@ -102,6 +134,37 @@ STRICT REQUIREMENTS:
                 synthesis = webResults || "Research completed with basic search results.";
             }
 
+            // --- Grounding & Anti-Hallucination Post-Processing ---
+            if (synthesis && toolSuccess) {
+                // 1. Clean dangling reference numbers at end of lines or sentences (e.g. "...data-driven insights. 23" -> "...data-driven insights.")
+                synthesis = synthesis.replace(/(\.|\?|!)\s+\d{1,2}\s*$/gm, "$1");
+                synthesis = synthesis.replace(/\s+\d{1,2}\s*$/gm, "");
+
+                // 2. Validate all URLs in synthesis against verifiedSources whitelist
+                const allowedUrls = new Set(verifiedSources.map(s => s.url));
+                const urlRegex = /https?:\/\/[^\s)\]'"]+/g;
+                const foundUrls = synthesis.match(urlRegex) || [];
+
+                for (const rawUrl of foundUrls) {
+                    if (!allowedUrls.has(rawUrl)) {
+                        console.warn(`[ResearchSubAgent] Stripping unverified/hallucinated URL: ${rawUrl}`);
+                        synthesis = synthesis.split(rawUrl).join("");
+                    }
+                }
+
+                // Clean up empty markdown links caused by stripped URLs
+                synthesis = synthesis.replace(/\[([^\]]+)\]\(\s*\)/g, "$1");
+
+                // 3. Ensure verified sources are appended with clickable markdown links
+                if (verifiedSources.length > 0) {
+                    const hasSourcesHeader = /###?\s*(?:verified\s+)?sources/i.test(synthesis);
+                    if (!hasSourcesHeader) {
+                        const sourcesBlock = "\n\n### Sources\n" + verifiedSources.map((s, idx) => `${idx + 1}. [${s.title}](${s.url})`).join("\n");
+                        synthesis = synthesis.trim() + sourcesBlock;
+                    }
+                }
+            }
+
             const executionTimeMs = Date.now() - startTime;
             ToolExecutionContract.logExecution({
                 requestId: task.taskId,
@@ -110,7 +173,7 @@ STRICT REQUIREMENTS:
                 executionStatus: toolSuccess ? "SUCCESS" : "FAILED",
                 durationMs: executionTimeMs,
                 errorCategory: toolSuccess ? "NONE" : ToolExecutionContract.categorizeError(webResults),
-                details: toolSuccess ? `Synthesized ${synthesis.length} chars` : webResults
+                details: toolSuccess ? `Synthesized ${synthesis.length} chars with ${verifiedSources.length} verified sources` : webResults
             });
 
             return {
@@ -120,7 +183,7 @@ STRICT REQUIREMENTS:
                 toolName: "web_search",
                 toolOutput: webResults,
                 verified: toolSuccess,
-                verificationReason: toolSuccess ? "Web search results gathered and synthesized" : "Web search API unavailable or returned empty result",
+                verificationReason: toolSuccess ? `Web search gathered ${verifiedSources.length} verified sources and synthesized grounded response` : "Web search API unavailable or returned empty result",
                 resultData: toolSuccess 
                     ? `### Research Synthesis\n\n${synthesis.trim()}` 
                     : (isErrorSnippet

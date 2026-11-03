@@ -110,7 +110,7 @@ export class ToolExecutionContract {
         const lower = prompt.toLowerCase();
 
         // 1. Web Search
-        if (/\b(?:search(?:\s+(?:the\s+(?:web|internet)|online|google|bing))?(?:\s+for)?|look\s+up|web\s+search)\b/i.test(lower)) {
+        if (/\b(?:re?search(?:\s+(?:the\s+)?(?:web|internet|online))?(?:\s+for)?|search(?:\s+(?:the\s+(?:web|internet)|online|google|bing))?(?:\s+for)?|look\s+up|web\s+search)\b/i.test(lower)) {
             // Guard: Not a memory search
             if (!/\b(?:search\s+memory|saved\s+facts?|my\s+notes?)\b/i.test(lower)) {
                 return { requiresTool: true, expectedTool: "web_search", targetAgent: "research" };
@@ -118,8 +118,13 @@ export class ToolExecutionContract {
         }
 
         // 2. Code Execution & Sandbox
-        if (/\b(?:run\s+(?:the\s+)?(?:code|script)|execute\s+(?:the\s+)?(?:code|script)|write\s+(?:code|script|sandbox))\b/i.test(lower) || /\.(?:ts|js|py)\b/i.test(lower)) {
-            return { requiresTool: true, expectedTool: "run_sandbox_code", targetAgent: "coding" };
+        if (
+            /\b(?:run|execute|eval)\s+(?:the\s+)?(?:code|script|program)\b/i.test(lower) ||
+            /\b(?:write|create|generate|implement)\s+(?:a\s+|some\s+)?(?:[a-zA-Z0-9_\-]+\s+)*(?:code|script|function|program|solution|file|sandbox\s+file)\b/i.test(lower) ||
+            /\b(?:in\s+(?:the\s+)?(?:permitted\s+)?sandbox|sandbox\s+file)\b/i.test(lower) ||
+            /\.(?:ts|js|py)\b/i.test(lower)
+        ) {
+            return { requiresTool: true, expectedTool: "write_sandbox_file", targetAgent: "coding" };
         }
 
         // 3. Web Scraping & URL Browsing
@@ -147,7 +152,11 @@ export class ToolExecutionContract {
             return { requiresTool: true, expectedTool: "search_memory", targetAgent: "memory" };
         }
 
+        // 8. System Diagnostics & Audit
+        if (/\b(?:run\s+(?:system\s+)?audit|audit\s+system|check\s+system\s+health)\b/i.test(lower)) {
+            return { requiresTool: true, expectedTool: "run_system_audit", targetAgent: "conversation" };
+        }
+
         return { requiresTool: false };
     }
 }
-

@@ -78,7 +78,12 @@ ${task.contextPayload?.context ? `=== Memory Context ===\n${task.contextPayload.
 Guidelines:
 - If the user asks what they previously asked or questions about previous context, refer directly to the Recent Questions and Recent Conversation Dialogue History above.
 - Never state that the user hasn't asked anything if recent messages are present in the history.
-- Never claim you lack capabilities. Be brief, professional, and direct.`;
+- Never claim you lack capabilities. Be brief, professional, and direct.
+
+CRITICAL ANTI-EVASION & TRUTHFULNESS RULES:
+- NEVER pretend to perform future or offline actions (e.g. NEVER say "Sure, I'll review the recent failure logs...", "I will inspect...", or "Let me know if you'd like me to include logs").
+- NEVER make false promises or tell the user you are checking something unless a tool has actually executed.
+- If the user asks about or asserts system reliability properties (e.g., failure truthfulness or duplicate reply prevention), state factually and directly what the system guarantees: OpenClaw Echo enforces truthful failure reporting without silent fallbacks, and uses request deduplication caching to guarantee no duplicate replies are sent.`;
 
                 const messages = [
                     new SystemMessage(systemPrompt),
@@ -126,4 +131,3 @@ Guidelines:
         }
     }
 }
-

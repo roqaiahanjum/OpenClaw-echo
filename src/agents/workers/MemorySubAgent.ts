@@ -25,34 +25,33 @@ export class MemorySubAgent implements WorkerAgent {
             let toolName = "search_memory";
             let toolArgs: any = {};
             let isWriteOperation = false;
+            let extractedFact: any = null;
 
             // 1. Identify Read vs Write Operations
-            const isNameQuery = /\b(?:what(?:'s|\s+is)\s+my\s+name|who\s+am\s+i|do\s+you\s+(?:know|remember)\s+my\s+name|tell\s+me\s+my\s+name|what\s+is\s+my\s+identity)\b/i.test(lower);
-            const isOffsetPriorHistory = /\b(?:the\s+one\s+before|before\s+that|prior\s+to\s+that|one\s+before\s+it|question\s+before)\b/i.test(lower);
-            const isQuestionHistory = isOffsetPriorHistory || /\b(?:(?:last|previous|recent|earlier)\s+(?:\d+|one|two|three|four|five)?\s*questions?|what\s+(?:was|were)\s+(?:my|the)\s+(?:last|previous|recent)\s+(?:\d+|one|two|three|four|five)?\s*questions?|what\s+did\s+i\s+(?:last|just|previously)\s*(?:ask|inquire)|which\s+(?:two\s+|three\s+)?questions?\s+(?:have\s+i\s+asked|did\s+i\s+ask)|list\s+(?:everything|all)\s+i\s+asked)\b/i.test(lower);
-            const isMessageHistory = !isQuestionHistory && /\b(?:(?:last|previous|recent|earlier)\s+(?:\d+|one|two|three|four|five)?\s*(?:messages?|chats?|turns?|texts?)|what\s+did\s+i\s+(?:just\s+)?say|conversation\s+history)\b/i.test(lower);
-
-            const isReadQuery = isNameQuery || isQuestionHistory || isMessageHistory ||
-                /\b(?:what\s+did\s+i\s+save|what\s+do\s+you\s+remember|what\s+have\s+i\s+saved|what\s+is\s+saved|search|recall|find|list\s+knowledge|all\s+facts|memory\s+stats|how\s+many\s+facts)\b/i.test(lower) ||
-                /^(?:what|which|where|who|when|how|do\s+you|can\s+you|tell\s+me|search|recall|find)\b/i.test(lower) ||
-                lower.endsWith("?");
-
             const hasRememberDirective = /\b(?:remember|save|store|memorize|keep\s+in\s+mind|note\s+down)\b/i.test(lower);
-            const isFactStatement = !isReadQuery && /^(?:my\s+[a-z0-9_\-\s]+?\s+is|i\s+am|i\s+study|i\s+work|i\s+prefer|our\s+[a-z0-9_\-\s]+?\s+is)\b/i.test(lower);
+            const isFactStatement = /^(?:my\s+[a-z0-9_\-\s]+?\s+is|i\s+am|i\s+study|i\s+work|i\s+prefer|our\s+[a-z0-9_\-\s]+?\s+is)\b/i.test(lower) && !/\b(?:what|which|where|who|how)\b/i.test(lower);
 
-            if (!isReadQuery && (hasRememberDirective || isFactStatement || lower.includes("remember") || lower.includes("save") || lower.includes("store"))) {
+            // An explicit write directive (e.g. "Remember that...", "Save that...") always takes precedence over questions in compound prompts
+            const requiresWrite = hasRememberDirective || isFactStatement;
+
+            const isNameQuery = !requiresWrite && /\b(?:what(?:'s|\s+is)\s+my\s+name|who\s+am\s+i|do\s+you\s+(?:know|remember)\s+my\s+name|tell\s+me\s+my\s+name|what\s+is\s+my\s+identity)\b/i.test(lower);
+            const isOffsetPriorHistory = !requiresWrite && /\b(?:the\s+one\s+before|before\s+that|prior\s+to\s+that|one\s+before\s+it|question\s+before)\b/i.test(lower);
+            const isQuestionHistory = !requiresWrite && (isOffsetPriorHistory || /\b(?:(?:last|previous|recent|earlier)\s+(?:\d+|one|two|three|four|five)?\s*questions?|what\s+(?:was|were)\s+(?:my|the)\s+(?:last|previous|recent)\s+(?:\d+|one|two|three|four|five)?\s*questions?|what\s+did\s+i\s+(?:last|just|previously)\s*(?:ask|inquire)|which\s+(?:two\s+|three\s+)?questions?\s+(?:have\s+i\s+asked|did\s+i\s+ask)|list\s+(?:everything|all)\s+i\s+asked)\b/i.test(lower));
+            const isMessageHistory = !requiresWrite && !isQuestionHistory && /\b(?:(?:last|previous|recent|earlier)\s+(?:\d+|one|two|three|four|five)?\s*(?:messages?|chats?|turns?|texts?)|what\s+did\s+i\s+(?:just\s+)?say|conversation\s+history)\b/i.test(lower);
+
+            if (requiresWrite) {
                 isWriteOperation = true;
                 toolName = "save_knowledge";
 
                 // Extract structured fact with canonical key using FactExtractionEngine
                 const engine = FactExtractionEngine.getInstance();
-                const extracted = await engine.extractFact(task.taskDescription);
+                extractedFact = await engine.extractFact(task.taskDescription);
 
                 toolArgs = {
-                    category: extracted.category,
-                    key: extracted.key,
-                    value: extracted.value,
-                    confidence: extracted.confidence,
+                    category: extractedFact.category,
+                    key: extractedFact.key,
+                    value: extractedFact.value,
+                    confidence: extractedFact.confidence,
                     chatId
                 };
             } else if (isQuestionHistory) {
@@ -171,12 +170,15 @@ export class MemorySubAgent implements WorkerAgent {
             const router = ModelRouter.getInstance();
 
             try {
+                const hasFollowUpQuestion = lower.endsWith("?") || /\b(?:what|which|did\s+you|tell\s+me)\b/i.test(lower);
                 const systemPrompt = `You are OpenClaw Echo's Memory SubAgent.
 Report the memory operation result accurately to the user based ONLY on this verified tool output.
 NEVER fabricate or guess facts not present in the tool output. If no memories were found, clearly inform the user.
 Tool Name: ${toolName}
 Tool Output:
-${outputStr}`;
+${outputStr}
+${isWriteOperation && extractedFact ? `\nPersisted Fact Details:\n- Key: ${extractedFact.key}\n- Value: ${extractedFact.value}\n- Category: ${extractedFact.category}\n` : ""}
+${isWriteOperation && hasFollowUpQuestion ? "Note: The user also asked a question or requested verification in their prompt. Acknowledge that the fact has been saved AND directly answer their question using the newly persisted fact." : ""}`;
 
                 const messages = [
                     new SystemMessage(systemPrompt),

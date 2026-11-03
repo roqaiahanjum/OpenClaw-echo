@@ -55,7 +55,23 @@ export class FactExtractionEngine {
             .replace(/[.!,;]+$/g, "")
             .trim();
 
-        const stmtLower = statement.toLowerCase();
+        // If there are multiple clauses or a follow-up question (e.g. "my favorite programming language is Python. What did I tell you?"),
+        // prioritize the fact clause before evaluating rules.
+        const clauses: string[] = [statement];
+        const sentenceSplit = statement.split(/(?<=[.!?])\s+|\s+(?=(?:what|which|where|who|when|how|did|do|can)\s+)/i);
+        if (sentenceSplit.length > 1 && sentenceSplit[0].trim()) {
+            clauses.unshift(sentenceSplit[0].replace(/[.!,;?]+$/g, "").trim());
+        }
+
+        for (const candidateStatement of clauses) {
+            const result = this.evaluateStatementRules(candidateStatement, input);
+            if (result) return result;
+        }
+
+        return null;
+    }
+
+    private evaluateStatementRules(statement: string, input: string): ExtractedFact | null {
 
         // 1. Projects: sample project, demo project, side project, main project
         // "my sample project is called Aurora" -> category: project, key: sample_project_name, value: Aurora

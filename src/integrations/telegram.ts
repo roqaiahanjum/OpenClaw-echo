@@ -268,7 +268,9 @@ export const executeAutonomousFlow = async (input: string, chatId?: string | num
         }
 
         // ◄── STEP 3: INTENT CLASSIFICATION & MANDATORY AGENT ROUTING ──►
-        const intentDecision = await classifyUserIntentAsync(input);
+        const recentHistoryRows = await memory.getRecentTurns(chatId?.toString() || 'default', 5).catch(() => []);
+        const recentDialogueTurns = recentHistoryRows.map(r => ({ user: r.user_msg, bot: r.agent_res }));
+        const intentDecision = await classifyUserIntentAsync(input, recentDialogueTurns);
         DashboardLogger.log(`[IntentRouter] Intent: ${intentDecision.intent} -> Primary Agent: ${intentDecision.primaryAgent} (Confidence: ${Math.round(intentDecision.confidence * 100)}%)`);
         if (requestId) {
             console.log(`[StructuredLog] [RequestId:${requestId}] [Event:IntentClassified] [Intent:${intentDecision.intent}] [PrimaryAgent:${intentDecision.primaryAgent}] [Confidence:${intentDecision.confidence}]`);
