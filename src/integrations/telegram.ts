@@ -1528,7 +1528,7 @@ app.get("/healthz", (req: Request, res: Response) => {
 app.get("/readyz", async (req: Request, res: Response) => {
     try {
         const memoryOk = await memory.checkHealth().then(h => h.sqlite.status === "connected").catch(() => false);
-        const routerOk = await router.checkHealth().then(h => h.gemini?.status === "healthy" || h.groq?.status === "healthy").catch(() => false);
+        const routerOk = await router.checkHealth().then(h => (h.gemini?.status === "connected" || h.gemini?.status === "healthy") || (h.groq?.status === "connected" || h.groq?.status === "healthy")).catch(() => false);
         if (memoryOk) {
             res.status(200).json({
                 status: "ready",

@@ -655,7 +655,7 @@ export class ModelRouter {
             },
             groq: {
                 status: hasGroq ? "connected" : "offline",
-                fallbackMode: this.isModelInCooldown("groq-llama-8b"),
+                fallbackMode: this.isModelInCooldown("groq-fast"),
                 details: hasGroq ? "Groq SDK Active." : "GROQ_API_KEY missing."
             },
             ollama: {
