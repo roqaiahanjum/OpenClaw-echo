@@ -53,7 +53,12 @@ export class ToolExecutionContract {
             lower.includes("credentials") || 
             lower.includes("unauthorized") ||
             lower.includes("eauth") ||
-            lower.includes("forbidden")
+            lower.includes("forbidden") ||
+            lower.includes("username and password") ||
+            lower.includes("badcredentials") ||
+            lower.includes("535") ||
+            lower.includes("auth failed") ||
+            lower.includes("authentication")
         ) {
             return "AUTH_CONFIG";
         }

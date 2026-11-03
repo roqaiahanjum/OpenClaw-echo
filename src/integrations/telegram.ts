@@ -23,7 +23,7 @@ import { validateResponseHonesty } from "../core/toolHonestyGuard";
 import { isSimpleConversation } from "../core/conversationGuard";
 import { ToolSelector } from "../core/toolSelector";
 import { AuthManager } from "../core/auth";
-import { classifyUserIntent } from "../core/intentClassifier";
+import { classifyUserIntent, classifyUserIntentAsync } from "../core/intentClassifier";
 import { WebhookTracker } from "./webhookTracker";
 import { telemetry } from "./telemetry";
 
@@ -268,7 +268,7 @@ export const executeAutonomousFlow = async (input: string, chatId?: string | num
         }
 
         // ◄── STEP 3: INTENT CLASSIFICATION & MANDATORY AGENT ROUTING ──►
-        const intentDecision = classifyUserIntent(input);
+        const intentDecision = await classifyUserIntentAsync(input);
         DashboardLogger.log(`[IntentRouter] Intent: ${intentDecision.intent} -> Primary Agent: ${intentDecision.primaryAgent} (Confidence: ${Math.round(intentDecision.confidence * 100)}%)`);
         if (requestId) {
             console.log(`[StructuredLog] [RequestId:${requestId}] [Event:IntentClassified] [Intent:${intentDecision.intent}] [PrimaryAgent:${intentDecision.primaryAgent}] [Confidence:${intentDecision.confidence}]`);

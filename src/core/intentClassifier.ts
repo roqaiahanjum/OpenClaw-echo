@@ -96,7 +96,7 @@ const GENERAL_TOOL_PATTERNS = [
     /\b(?:send\s+(?:an?\s+|the\s+|me\s+an?\s+)?(?:email|mail)|email\s+to|mail\s+to|smtp|send_email|email\s+report|check\s+(?:the\s+)?(?:smtp|email))\b/i,
     /\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b/i,
     /\b(?:git\s+status|git\s+commit|git\s+diff|git\s+log)\b/i,
-    /\b(?:set\s+timer|cron|schedule\s+task|clockwork)\b/i
+    /\b(?:set\s+timer|cron|schedule(?:\s+(?:a\s+|an\s+|the\s+)?(?:new\s+)?task)?|clockwork)\b/i
 ];
 
 /**
@@ -285,4 +285,89 @@ export function classifyUserIntent(input: string, contextTurns?: Array<{ user: s
         targetAgents: ["conversation"],
         confidence: 0.80
     };
+}
+
+/**
+ * Asynchronous Intent Classification Router
+ * Evaluates deterministic fast-path first. If confidence < 0.90 (e.g. nuanced query or varied wording),
+ * consults ModelRouter with strict schema validation and a short timeout.
+ */
+export async function classifyUserIntentAsync(
+    input: string, 
+    contextTurns?: Array<{ user: string; bot?: string } | string>
+): Promise<IntentDecision> {
+    const fastDecision = classifyUserIntent(input, contextTurns);
+
+    // High confidence deterministic fast-path (e.g., pure greeting "Hello" or explicit code "run sandbox")
+    if (fastDecision.confidence >= 0.95) {
+        return fastDecision;
+    }
+
+    // If query is an empty string or pure greeting, no need to query LLM
+    const trimmed = input.trim();
+    if (!trimmed || CONVERSATIONAL_PATTERNS.some(p => p.test(trimmed))) {
+        return fastDecision;
+    }
+
+    // Ambiguous, varied wording, or nuanced query: use ModelRouter LLM-based intent decision
+    try {
+        const { ModelRouter } = await import("./router");
+        const { SystemMessage, HumanMessage } = await import("@langchain/core/messages");
+        const router = ModelRouter.getInstance();
+
+        const contextSnippet = contextTurns && contextTurns.length > 0
+            ? "\nRecent Conversation:\n" + contextTurns.slice(-3).map(t => typeof t === "string" ? t : `User: ${t.user || ""}\nBot: ${t.bot || ""}`).join("\n")
+            : "";
+
+        const systemPrompt = `You are the Intent Classification Router for OpenClaw Echo AI agent.
+Analyze the user message and determine the optimal subagent and intent.
+
+Available Intents & Agents:
+1. "CONVERSATION" (Agent: "conversation"): Greetings, conversational pleasantries, bot persona questions ("who are you"), chitchat.
+2. "RESEARCH_ONLY" (Agent: "research"): Asking for external facts, real-world knowledge, web search, looking up people/places/repos/projects, news, documentation.
+3. "BROWSER_ONLY" (Agent: "browser"): Explicit URLs, visiting webpages, web scraping.
+4. "CODING_ONLY" (Agent: "coding"): Writing, modifying, executing, or debugging code or sandbox scripts.
+5. "MEMORY_ONLY" (Agent: "memory"): Asking about user's own identity, saved facts, past questions ("what did I ask earlier"), notes.
+6. "GENERAL_TOOL" (Agent: "conversation"): Sending emails, git operations, scheduling tasks, project goals.
+7. "MULTI_AGENT" (Agent: "planner"): Complex multi-step requests requiring multiple distinct capabilities.
+
+Output STRICT JSON only:
+{"intent": "RESEARCH_ONLY", "primaryAgent": "research", "confidence": 0.95, "reason": "concise reason"}`;
+
+        const timeoutPromise = new Promise<null>((_, reject) => {
+            setTimeout(() => reject(new Error("INTENT_ROUTER_TIMEOUT")), 2500);
+        });
+
+        const messages = [
+            new SystemMessage(systemPrompt),
+            new HumanMessage(`User Message: "${input}"${contextSnippet}`)
+        ];
+
+        const response: any = await Promise.race([
+            router.invoke(messages, "intent_classifier"),
+            timeoutPromise
+        ]);
+
+        const rawContent = response?.content ? String(response.content) : "";
+        const jsonMatch = rawContent.match(/\{[\s\S]*?\}/);
+        if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0]);
+            const validIntents: UserIntent[] = ["CONVERSATION", "RESEARCH_ONLY", "BROWSER_ONLY", "CODING_ONLY", "MEMORY_ONLY", "MULTI_AGENT", "GENERAL_TOOL"];
+            const validAgents: TargetAgentType[] = ["conversation", "research", "browser", "coding", "memory", "planner"];
+
+            if (validIntents.includes(parsed.intent) && validAgents.includes(parsed.primaryAgent)) {
+                return {
+                    intent: parsed.intent,
+                    primaryAgent: parsed.primaryAgent,
+                    reason: parsed.reason || "Classified via semantic ModelRouter intent engine.",
+                    targetAgents: [parsed.primaryAgent],
+                    confidence: typeof parsed.confidence === "number" ? parsed.confidence : 0.95
+                };
+            }
+        }
+    } catch (e: any) {
+        // Fall back gracefully to deterministic fast decision on timeout or error
+    }
+
+    return fastDecision;
 }
