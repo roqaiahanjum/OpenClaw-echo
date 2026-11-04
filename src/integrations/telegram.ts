@@ -38,10 +38,30 @@ function generateCorrId(updateId: any): string {
 
 dotenv.config();
 
+export function sanitizeTelegramError(err: any): string {
+    const token = process.env.TELEGRAM_TOKEN || process.env.TELEGRAM_BOT_TOKEN || "";
+    let msg = "";
+    if (typeof err === "string") {
+        msg = err;
+    } else if (err?.stack) {
+        msg = err.stack;
+    } else if (err?.message) {
+        msg = err.message;
+    } else {
+        msg = String(err);
+    }
+    if (token) {
+        msg = msg.split(token).join("[REDACTED_BOT_TOKEN]");
+    }
+    // Mask bot tokens inside Telegram API URLs (e.g. /bot<TOKEN>/...)
+    msg = msg.replace(/\/bot[a-zA-Z0-9_:-]+/g, "/bot[REDACTED_BOT_TOKEN]");
+    return msg;
+}
+
 const bot = new Telegraf(process.env.TELEGRAM_TOKEN || "");
 
 bot.catch((err: any, ctx: Context) => {
-    console.error(`[Telegram] Bot error caught by handler for update ${ctx?.update?.update_id}:`, err?.message || err);
+    console.error(`[Telegram] Bot error caught by handler for update ${ctx?.update?.update_id}:`, sanitizeTelegramError(err));
 });
 
 const router = ModelRouter.getInstance();
@@ -1508,9 +1528,9 @@ app.post(WEBHOOK_PATH, async (req: Request, res: Response) => {
                 await webhookTracker.markCompleted(updateId);
             }
         } catch (err: any) {
-            console.error(`[TelegramWebhook] Asynchronous error processing update ${updateId}:`, err?.message || err);
+            console.error(`[TelegramWebhook] Asynchronous error processing update ${updateId}:`, sanitizeTelegramError(err));
             if (updateId != null) {
-                await webhookTracker.markFailed(updateId, err?.message || String(err));
+                await webhookTracker.markFailed(updateId, sanitizeTelegramError(err));
             }
         }
     })();
@@ -1525,8 +1545,8 @@ app.post(WEBHOOK_PATH, async (req: Request, res: Response) => {
 });
 
 app.use((err: any, req: Request, res: Response, next: any) => {
-    console.error("[Server Error]", err.stack);
-    res.status(500).json({ error: "Internal Server Error", details: err.message });
+    console.error("[Server Error]", sanitizeTelegramError(err));
+    res.status(500).json({ error: "Internal Server Error", details: sanitizeTelegramError(err) });
 });
 
 app.get("/healthz", (req: Request, res: Response) => {
@@ -1577,6 +1597,7 @@ app.get("*", (req: Request, res: Response) => {
     });
 });
 
+
 export const startServer = async (initialPort?: number) => {
     if (!process.env.TELEGRAM_TOKEN) {
         console.error("[Fatal] TELEGRAM_TOKEN missing.");
@@ -1621,17 +1642,47 @@ export const startServer = async (initialPort?: number) => {
                 const webhookUrlBase = process.env.TELEGRAM_WEBHOOK_URL || (process.env.RENDER_EXTERNAL_URL ? process.env.RENDER_EXTERNAL_URL : (process.env.RAILWAY_STATIC_URL ? `https://${process.env.RAILWAY_STATIC_URL}` : ""));
                 if (!webhookUrlBase) {
                     console.error("[Telegram] TELEGRAM_WEBHOOK_URL missing for webhook mode.");
+                } else if (!webhookUrlBase.startsWith("https://")) {
+                    console.error(`[Telegram] Invalid webhook URL: must start with https://, got: ${webhookUrlBase}`);
                 } else {
                     const fullWebhookUrl = `${webhookUrlBase.replace(/\/+$/, '')}${WEBHOOK_PATH}`;
-                    try {
-                        await bot.telegram.setWebhook(fullWebhookUrl, { drop_pending_updates: false });
-                        DashboardLogger.log(`✅ Webhook registered: ${fullWebhookUrl}`);
-                        // Run durable recovery sweep in background for any updates left incomplete before crash/restart
-                        webhookTracker.recoverPendingUpdates(bot).catch(e => {
-                            console.warn("[Telegram] Webhook recovery sweep error:", e.message);
-                        });
-                    } catch (err: any) {
-                        console.error("[Telegram] Webhook setup failed:", err.message);
+                    const MAX_WEBHOOK_RETRIES = 5;
+                    let webhookRegistered = false;
+
+                    for (let attempt = 1; attempt <= MAX_WEBHOOK_RETRIES; attempt++) {
+                        try {
+                            await bot.telegram.setWebhook(fullWebhookUrl, { drop_pending_updates: false });
+                            webhookRegistered = true;
+                            DashboardLogger.log(`✅ Webhook registered: ${fullWebhookUrl}`);
+                            // Run durable recovery sweep in background for any updates left incomplete before crash/restart
+                            webhookTracker.recoverPendingUpdates(bot).catch(e => {
+                                console.warn("[Telegram] Webhook recovery sweep error:", sanitizeTelegramError(e));
+                            });
+                            break;
+                        } catch (err: any) {
+                            const sanitized = sanitizeTelegramError(err);
+                            const errorCode = err?.response?.error_code || err?.code || err?.statusCode;
+                            const msg = String(err?.message || "");
+                            const isTerminal = 
+                                errorCode === 401 || errorCode === 403 || errorCode === 404 || errorCode === 400 ||
+                                msg.includes("401") || msg.includes("Unauthorized") ||
+                                msg.includes("403") || msg.includes("Forbidden") ||
+                                msg.includes("404") || msg.includes("Not Found") ||
+                                msg.includes("400") || msg.includes("Bad Request");
+
+                            if (isTerminal) {
+                                console.error(`[Telegram] Permanent webhook registration error (${errorCode || 'terminal'}): ${sanitized}. Aborting registration.`);
+                                break;
+                            }
+
+                            console.warn(`[Telegram] Webhook setup attempt ${attempt}/${MAX_WEBHOOK_RETRIES} failed: ${sanitized}`);
+                            if (attempt < MAX_WEBHOOK_RETRIES) {
+                                const backoffMs = Math.min(5000, 1000 * Math.pow(2, attempt - 1));
+                                await new Promise(r => setTimeout(r, backoffMs));
+                            } else {
+                                console.error(`[Telegram] Webhook setup permanently failed after ${MAX_WEBHOOK_RETRIES} attempts: ${sanitized}`);
+                            }
+                        }
                     }
                 }
             } else {
@@ -1661,7 +1712,7 @@ export const startServer = async (initialPort?: number) => {
                                     setTimeout(() => startPollingWithRetry(retryCount + 1), waitMs);
                                 }
                             } else {
-                                console.error("[Telegram] Polling error / Init failure:", err.message);
+                                console.error("[Telegram] Polling error / Init failure:", sanitizeTelegramError(err));
                             }
                         }
                     };
