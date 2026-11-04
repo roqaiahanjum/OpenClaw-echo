@@ -1,6 +1,8 @@
 // @ts-nocheck
 import dotenv from 'dotenv';
 import path from 'path';
+import dns from 'dns';
+try { dns.setDefaultResultOrder('ipv4first'); } catch (_) {}
 
 // Load .env from cwd or relative parent paths
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });

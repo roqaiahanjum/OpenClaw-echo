@@ -37,6 +37,8 @@ function generateCorrId(updateId: any): string {
 
 
 dotenv.config();
+import dns from 'dns';
+try { dns.setDefaultResultOrder('ipv4first'); } catch (_) {}
 
 export function sanitizeTelegramError(err: any): string {
     const token = process.env.TELEGRAM_TOKEN || process.env.TELEGRAM_BOT_TOKEN || "";
@@ -1634,6 +1636,15 @@ export const startServer = async (initialPort?: number) => {
                 );
             });
             await Clockwork.boot();
+
+            // Pre-fetch bot identity to avoid lazy getMe network races during updates
+            try {
+                const me = await bot.telegram.getMe();
+                bot.botInfo = me;
+                DashboardLogger.log(`🤖 Bot identity verified: @${me.username} (${me.id})`);
+            } catch (e: any) {
+                console.warn('[Telegram] Non-fatal getMe prefetch warning:', sanitizeTelegramError(e));
+            }
 
             // Connect Telegram
             if (mode === "disabled" || mode === "off" || mode === "none") {
