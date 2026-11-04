@@ -292,6 +292,9 @@ export const executeAutonomousFlow = async (input: string, chatId?: string | num
         // ◄── STEP 3: INTENT CLASSIFICATION & MANDATORY AGENT ROUTING ──►
         const recentHistoryRows = await memory.getRecentTurns(chatId?.toString() || 'default', 5).catch(() => []);
         const recentDialogueTurns = recentHistoryRows.map(r => ({ user: r.user_msg, bot: r.agent_res }));
+        const dialogueHistoryFormatted = recentDialogueTurns.length > 0
+            ? recentDialogueTurns.map(t => `User: ${t.user}\nAssistant: ${t.bot}`).join("\n\n")
+            : "";
         const intentDecision = await classifyUserIntentAsync(input, recentDialogueTurns);
         DashboardLogger.log(`[IntentRouter] Intent: ${intentDecision.intent} -> Primary Agent: ${intentDecision.primaryAgent} (Confidence: ${Math.round(intentDecision.confidence * 100)}%)`);
         if (requestId) {
@@ -307,7 +310,7 @@ export const executeAutonomousFlow = async (input: string, chatId?: string | num
                 parentId: `root_${Date.now()}`,
                 targetAgent: "planner",
                 taskDescription: input,
-                contextPayload: { originalPrompt: input, chatId: userChatId },
+                contextPayload: { originalPrompt: input, chatId: userChatId, dialogueHistory: recentDialogueTurns, dialogueHistoryFormatted },
                 maxDepth: 3,
                 dependsOn: []
             };
@@ -336,7 +339,7 @@ export const executeAutonomousFlow = async (input: string, chatId?: string | num
                 parentId: `root_${Date.now()}`,
                 targetAgent: "coding",
                 taskDescription: input,
-                contextPayload: { originalPrompt: input, fileName, chatId: userChatId },
+                contextPayload: { originalPrompt: input, fileName, chatId: userChatId, dialogueHistory: recentDialogueTurns, dialogueHistoryFormatted },
                 maxDepth: 1,
                 dependsOn: []
             };
@@ -363,7 +366,7 @@ export const executeAutonomousFlow = async (input: string, chatId?: string | num
                 parentId: `root_${Date.now()}`,
                 targetAgent: "research",
                 taskDescription: input,
-                contextPayload: { originalPrompt: input, chatId: userChatId },
+                contextPayload: { originalPrompt: input, chatId: userChatId, dialogueHistory: recentDialogueTurns, dialogueHistoryFormatted },
                 maxDepth: 1,
                 dependsOn: []
             };
@@ -390,7 +393,7 @@ export const executeAutonomousFlow = async (input: string, chatId?: string | num
                 parentId: `root_${Date.now()}`,
                 targetAgent: "browser",
                 taskDescription: input,
-                contextPayload: { originalPrompt: input, chatId: userChatId },
+                contextPayload: { originalPrompt: input, chatId: userChatId, dialogueHistory: recentDialogueTurns, dialogueHistoryFormatted },
                 maxDepth: 1,
                 dependsOn: []
             };
@@ -417,7 +420,7 @@ export const executeAutonomousFlow = async (input: string, chatId?: string | num
                 parentId: `root_${Date.now()}`,
                 targetAgent: "memory",
                 taskDescription: input,
-                contextPayload: { originalPrompt: input, chatId: userChatId || "default", context },
+                contextPayload: { originalPrompt: input, chatId: userChatId || "default", context, dialogueHistory: recentDialogueTurns, dialogueHistoryFormatted },
                 maxDepth: 1,
                 dependsOn: []
             };
@@ -439,14 +442,14 @@ export const executeAutonomousFlow = async (input: string, chatId?: string | num
         // 6. CONVERSATION PIPELINE (ConversationSubAgent with mandatory get_conversation_context tool)
         // Strictly handles pure conversational greetings and persona inquiries.
         // General subsystem tools (e.g. email, goals, git, clockwork) proceed to autonomous execution.
-        if (!isPhoto && intentDecision.intent === "CONVERSATION") {
-            if (progressFn) await progressFn("💬 _Retrieving conversation context and local knowledge..._").catch(() => {});
+        if (!isPhoto && (intentDecision.intent === "CONVERSATION" || (intentDecision.primaryAgent === "conversation" && intentDecision.intent !== "GENERAL_TOOL"))) {
+            if (progressFn) await progressFn("💬 _Formulating thoughtful response..._").catch(() => {});
             const convTask: ACPTask = {
                 taskId: `task_conv_${Date.now()}`,
                 parentId: `root_${Date.now()}`,
                 targetAgent: "conversation",
                 taskDescription: input,
-                contextPayload: { originalPrompt: input, chatId: chatId?.toString() || "default", context },
+                contextPayload: { originalPrompt: input, chatId: chatId?.toString() || "default", context, dialogueHistory: recentDialogueTurns, dialogueHistoryFormatted },
                 maxDepth: 1,
                 dependsOn: []
             };

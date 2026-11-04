@@ -19,7 +19,7 @@ export type UserIntent =
     | "RESEARCH_ONLY" 
     | "BROWSER_ONLY" 
     | "CODING_ONLY" 
-    | "MEMORY_ONLY"
+    | "MEMORY_ONLY" 
     | "MULTI_AGENT" 
     | "GENERAL_TOOL";
 
@@ -50,12 +50,13 @@ export const EXPLICIT_BROWSER_PATTERNS = [
     /\b(?:official\s+docs|online\s+documentation|official\s+documentation)\b/i
 ];
 
-// 3. Explicit Research Intent: User specifically asks to research or investigate a topic
+// 3. Explicit Research Intent: User specifically asks for live web search, recent 2026 events, or citations
 export const EXPLICIT_RESEARCH_PATTERNS = [
-    /\b(?:research(?:\s+(?:on|into|about|the|[a-zA-Z0-9_\-]+))|conduct\s+research|investigate|literature\s+on|survey\s+of|overview\s+of|scientific\s+study|clinical\s+study|case\s+study)\b/i,
-    /\b(?:what\s+are\s+the\s+latest|latest\s+advancements|latest\s+news|recent\s+developments)\b/i,
-    /\b(?:search(?:\s+(?:the\s+(?:web|internet)|online|google|bing))?(?:\s+for|\s+latest)?|find\s+information(?:\s+about|\s+on)?|look\s+up|web\s+search)\b/i,
-    /\b(?:history\s+of|benefits\s+of|architecture\s+of|comparison\s+of)\b/i
+    /\b(?:re?search(?:\s+(?:the\s+)?(?:web|internet|online))?|conduct\s+research|literature\s+(?:review|on)|scientific\s+study|clinical\s+study)\b/i,
+    /\b(?:search(?:\s+(?:the\s+(?:web|internet)|online|google|bing))(?:\s+for)?|look\s+up\s+online|find\s+(?:online\s+)?sources|web\s+search)\b/i,
+    /\b(?:what\s+are\s+the\s+latest|latest\s+advancements|latest\s+news|recent\s+developments|current\s+status\s+of|today's\s+news)\b/i,
+    /\b(?:in\s+2025|in\s+2026|recently\s+released|current\s+price|market\s+price|live\s+scores?)\b/i,
+    /\b(?:with\s+citations|citing\s+sources|provide\s+sources|give\s+sources|with\s+links)\b/i
 ];
 
 // 4. Explicit Memory Intent: User specifically asks to remember or recall saved facts
@@ -100,24 +101,51 @@ const GENERAL_TOOL_PATTERNS = [
 ];
 
 /**
+ * Checks whether the incoming message is a follow-up referring to the ongoing conversation.
+ */
+export function isFollowUpQuery(input: string, contextTurns?: Array<{ user: string; bot?: string } | string>): boolean {
+    if (!contextTurns || !Array.isArray(contextTurns) || contextTurns.length === 0) {
+        return false;
+    }
+
+    const trimmed = input.trim();
+    const lower = trimmed.toLowerCase();
+
+    // 1. Follow-up requests for examples, elaboration, simplification, clarification
+    const followUpPatterns = [
+        /^(?:can\s+you\s+)?(?:give|provide|show)\s+(?:me\s+)?(?:an?\s+)?(?:real[\s\-]world\s+)?example\b/i,
+        /^(?:can\s+you\s+)?(?:explain|clarify|elaborate|expand|simplify|break\s+down)\s+(?:that|this|it|more|further)\b/i,
+        /\b(?:with\s+(?:an?\s+)?example|give\s+(?:me\s+)?(?:an?\s+)?example|another\s+example|more\s+examples?)\b/i,
+        /^(?:what\s+about|how\s+about|why\s+is\s+that|why\s+so|how\s+so)\b/i,
+        /^(?:tell\s+me\s+more|more\s+details?|elaborate|clarify|continue|go\s+on)\b/i,
+        /^(?:can\s+you\s+)?(?:explain\s+further|explain\s+more|say\s+more)\b/i,
+        /^(?:does\s+that\s+mean|in\s+other\s+words|meaning\s+what)\b/i,
+        /^(?:what\s+do\s+you\s+mean|can\s+you\s+rephrase|in\s+simple\s+terms)\b/i,
+        /^(?:and\s+why|and\s+how|so\s+what)\b/i
+    ];
+
+    if (followUpPatterns.some(p => p.test(trimmed))) {
+        return true;
+    }
+
+    // 2. Anaphoric pronoun references without a standalone subject (e.g. "How does it work?", "Why is that?")
+    const hasAnaphoricReference = /\b(that|this|it|those|these|the\s+former|the\s+latter)\b/i.test(lower);
+    const isShortQuery = trimmed.split(/\s+/).length <= 10;
+    if (hasAnaphoricReference && isShortQuery) {
+        if (!/\b(remember\s+that|save\s+that|what\s+is\s+that|delete\s+that)\b/i.test(lower)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
  * Classifies an incoming user prompt into an actionable intent decision with mandatory subagent routing.
  */
 export function classifyUserIntent(input: string, contextTurns?: Array<{ user: string; bot?: string } | string>): IntentDecision {
     const trimmed = input.trim();
     let lower = trimmed.toLowerCase();
-
-    // If context turns provided, combine for follow-up intent inheritance
-    if (contextTurns && Array.isArray(contextTurns) && contextTurns.length > 0) {
-        const historyText = contextTurns.map(t => typeof t === "string" ? t : `${t.user || ""} ${t.bot || ""}`).join(" ").toLowerCase();
-        // Check if follow-up inherits email, browser, coding, or research intent
-        if ((lower.includes("send") || lower.includes("to") || lower.includes("@") || lower.includes("mail")) && (historyText.includes("email") || historyText.includes("smtp") || historyText.includes("report"))) {
-            lower = `${lower} send email`;
-        }
-        // Check if follow-up inherits conversation/question history intent
-        if ((lower.includes("before") || lower.includes("prior") || lower.includes("earlier") || lower.includes("that") || lower.includes("one")) && (historyText.includes("question") || historyText.includes("asked") || historyText.includes("last"))) {
-            lower = `${lower} previous question`;
-        }
-    }
 
     if (!trimmed) {
         return {
@@ -140,7 +168,7 @@ export function classifyUserIntent(input: string, contextTurns?: Array<{ user: s
         };
     }
 
-    // B. Check for explicit memory operations
+    // B. Check for explicit memory operations (user facts, saved info, history questions)
     if (EXPLICIT_MEMORY_PATTERNS.some(p => p.test(lower))) {
         return {
             intent: "MEMORY_ONLY",
@@ -162,7 +190,71 @@ export function classifyUserIntent(input: string, contextTurns?: Array<{ user: s
 
     const actualCodeIntent = hasCodeIntent && !isTextSummaryOnly;
 
-    // Multi-Agent Swarm Detection
+    // D. Multi-Turn Context Follow-Up Resolution
+    // Resolves follow-ups using both ongoing dialogue history and current task objective
+    if (isFollowUpQuery(trimmed, contextTurns)) {
+        const lastTurn = contextTurns && contextTurns.length > 0 ? contextTurns[contextTurns.length - 1] : null;
+        const lastUser = lastTurn ? (typeof lastTurn === "string" ? lastTurn : (lastTurn.user || "")) : "";
+        const lastBot = lastTurn ? (typeof lastTurn === "string" ? "" : (lastTurn.bot || "")) : "";
+        const lastWasCoding = /```(?:ts|js|py|python|typescript|javascript|bash|sh|json)/i.test(lastBot) || EXPLICIT_CODING_PATTERNS.some(p => p.test(lastUser));
+        const lastWasResearch = /### Sources|https?:\/\//i.test(lastBot) || EXPLICIT_RESEARCH_PATTERNS.some(p => p.test(lastUser));
+
+        // 1. Coding follow-up (inherits coding pipeline if previous turn was code or follow-up targets code)
+        const isCodingFollowUp = actualCodeIntent || (lastWasCoding && /\b(?:test|tests?|debug|fix|refactor|optimize|handle|error|null|exception|run|add|implement)\b/i.test(lower));
+        if (isCodingFollowUp) {
+            return {
+                intent: "CODING_ONLY",
+                primaryAgent: "coding",
+                reason: "Contextual follow-up requesting code implementation, refactoring, or tests for previous code.",
+                targetAgents: ["coding"],
+                confidence: 0.96
+            };
+        }
+
+        // 2. Web research follow-up (inherits research pipeline if previous turn was research or follow-up asks for sources/news)
+        const isResearchFollowUp = hasResearchIntent || (lastWasResearch && /\b(?:other|more\s+sources?|more\s+findings?|cite|references?|news|updates?|who\s+else)\b/i.test(lower));
+        if (isResearchFollowUp) {
+            return {
+                intent: "RESEARCH_ONLY",
+                primaryAgent: "research",
+                reason: "Contextual follow-up requesting additional live research or sources for previous research topic.",
+                targetAgents: ["research"],
+                confidence: 0.96
+            };
+        }
+
+        // 3. Conversational explanation / clarification / example follow-up
+        return {
+            intent: "CONVERSATION",
+            primaryAgent: "conversation",
+            reason: "Contextual follow-up requesting explanation, clarification, or example on previous dialogue topic.",
+            targetAgents: ["conversation"],
+            confidence: 0.98
+        };
+    }
+
+    // E. Subsystem Tools: Email, Git, Clockwork, Goals
+    if (/\b(send\s+(?:an?\s+|the\s+|me\s+an?\s+)?(?:email|mail)|email\s+to|mail\s+to|smtp|send_email|email\s+report|send\s+(?:it\s+)?to\s+[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\b/i.test(lower) || (lower.includes("@") && lower.includes("send"))) {
+        return {
+            intent: "GENERAL_TOOL",
+            primaryAgent: "conversation",
+            reason: "Email action detected; routing to autonomous tool execution pipeline with send_email_report.",
+            targetAgents: ["conversation"],
+            confidence: 0.95
+        };
+    }
+
+    if (GENERAL_TOOL_PATTERNS.some(p => p.test(lower))) {
+        return {
+            intent: "GENERAL_TOOL",
+            primaryAgent: "conversation",
+            reason: "Subsystem tool requested; routing via autonomous tool execution pipeline.",
+            targetAgents: ["conversation"],
+            confidence: 0.95
+        };
+    }
+
+    // F. Multi-Agent Swarm Detection
     const hasMultiStepKeywords = /\b(?:multi-step|multi-agent|step\s+by\s+step|first\s+.+\s+then|in\s+parallel|and\s+then|research\s+and\s+(?:generate|write|create))\b/i.test(lower);
     const activeAgentCount = (hasResearchIntent ? 1 : 0) + (hasBrowserIntent ? 1 : 0) + (actualCodeIntent ? 1 : 0);
 
@@ -186,7 +278,7 @@ export function classifyUserIntent(input: string, contextTurns?: Array<{ user: s
         };
     }
 
-    // Pure Code Generation Request
+    // G. Pure Code Generation Request
     if (actualCodeIntent && !hasResearchIntent && !hasBrowserIntent) {
         return {
             intent: "CODING_ONLY",
@@ -197,7 +289,7 @@ export function classifyUserIntent(input: string, contextTurns?: Array<{ user: s
         };
     }
 
-    // Pure Web Browsing Request
+    // H. Pure Web Browsing Request
     if (hasBrowserIntent && !actualCodeIntent && !hasResearchIntent) {
         return {
             intent: "BROWSER_ONLY",
@@ -208,72 +300,43 @@ export function classifyUserIntent(input: string, contextTurns?: Array<{ user: s
         };
     }
 
-    // Pure Research Request
+    // I. Explicit Web Research Request (real-time facts, 2026 events, citations, web lookup)
     if (hasResearchIntent && !actualCodeIntent && !hasBrowserIntent) {
         return {
             intent: "RESEARCH_ONLY",
             primaryAgent: "research",
-            reason: "User requested topic research and intelligence synthesis; routing to ResearchSubAgent.",
+            reason: "User requested live web research, current news, or external citations; routing to ResearchSubAgent.",
             targetAgents: ["research"],
             confidence: 0.95
         };
     }
 
-    // Subsystem Tools: Route directly to the owning agent
-    // 1. Email actions must route to research/conversational tool pipeline with send_email_report rather than MemorySubAgent
-    if (/\b(send\s+(?:an?\s+|the\s+|me\s+an?\s+)?(?:email|mail)|email\s+to|mail\s+to|smtp|send_email|email\s+report|send\s+(?:it\s+)?to\s+[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\b/i.test(lower) || (lower.includes("@") && lower.includes("send"))) {
-        return {
-            intent: "GENERAL_TOOL",
-            primaryAgent: "conversation", // Runs toolSelector pipeline which loads send_email_report
-            reason: "Email action detected; routing to autonomous tool execution pipeline with send_email_report.",
-            targetAgents: ["conversation"],
-            confidence: 0.95
-        };
-    }
+    // J. Educational / Conceptual / General Knowledge Questions
+    // e.g. "Explain machine learning in simple words", "What is photosynthesis?", "How does quicksort work?"
+    // These are conceptual educational questions that an LLM explains directly and conversationally
+    // without requiring Tavily web scraping or rigid research synthesis templates.
+    const isEducationalExplanation = /^(?:explain|can you explain|how does|how do|what is|what are|why does|why do|why is|tell me about|teach me|describe|define)\b/i.test(trimmed) &&
+        !hasResearchIntent && !hasBrowserIntent && !actualCodeIntent;
 
-    if (GENERAL_TOOL_PATTERNS.some(p => p.test(lower))) {
-        return {
-            intent: "GENERAL_TOOL",
-            primaryAgent: "conversation",
-            reason: "Subsystem tool requested; routing via autonomous tool execution pipeline.",
-            targetAgents: ["conversation"],
-            confidence: 0.95
-        };
-    }
-
-    // Informational questions:
-    // User personal/saved facts (with "my", "i", "save", "remember") were already caught in EXPLICIT_MEMORY_PATTERNS above.
-    // General-knowledge or external entity queries (e.g. "who is the founder of omni-ide?", "what is the capital of Japan?")
-    // must be routed to research with web_search/knowledge graph for grounded factual answers.
-    const isGeneralQuestion = /^(?:what|why|how|who|when|where|explain|can you explain|define|tell me about)\b/i.test(trimmed);
-    if (isGeneralQuestion && !actualCodeIntent && !hasBrowserIntent) {
-        const isPersonalFactQuery = /\b(my|i|me|we|our|saved|remember|history)\b/i.test(lower);
+    if (isEducationalExplanation) {
+        const isPersonalFactQuery = /\b(?:my|saved\s+facts?|my\s+notes?|remember\s+about\s+me|about\s+myself)\b/i.test(lower) ||
+            /\b(?:what|where|who|which)\s+(?:am\s+i|did\s+i\s+(?:say|tell|ask|save|store))\b/i.test(lower);
         if (isPersonalFactQuery) {
             return {
                 intent: "MEMORY_ONLY",
                 primaryAgent: "memory",
                 reason: "Personal fact/memory query routed to MemorySubAgent.",
                 targetAgents: ["memory"],
-                confidence: 0.92
+                confidence: 0.95
             };
         }
-        return {
-            intent: "RESEARCH_ONLY",
-            primaryAgent: "research",
-            reason: "General knowledge or entity inquiry routed to ResearchSubAgent with web_search.",
-            targetAgents: ["research"],
-            confidence: 0.92
-        };
-    }
 
-    // Fallback: If research or search keywords match loosely
-    if (hasResearchIntent) {
         return {
-            intent: "RESEARCH_ONLY",
-            primaryAgent: "research",
-            reason: "Defaulted to research subagent based on query keywords.",
-            targetAgents: ["research"],
-            confidence: 0.85
+            intent: "CONVERSATION",
+            primaryAgent: "conversation",
+            reason: "Conceptual educational explanation request; routing to ConversationSubAgent for clear, accessible direct explanation.",
+            targetAgents: ["conversation"],
+            confidence: 0.96
         };
     }
 
@@ -283,13 +346,13 @@ export function classifyUserIntent(input: string, contextTurns?: Array<{ user: s
         primaryAgent: "conversation",
         reason: "Standard interaction routed to ConversationSubAgent with get_conversation_context tool.",
         targetAgents: ["conversation"],
-        confidence: 0.80
+        confidence: 0.85
     };
 }
 
 /**
  * Asynchronous Intent Classification Router
- * Evaluates deterministic fast-path first. If confidence < 0.90 (e.g. nuanced query or varied wording),
+ * Evaluates deterministic fast-path first. If confidence < 0.95 (e.g. nuanced query or varied wording),
  * consults ModelRouter with strict schema validation and a short timeout.
  */
 export async function classifyUserIntentAsync(
@@ -298,7 +361,7 @@ export async function classifyUserIntentAsync(
 ): Promise<IntentDecision> {
     const fastDecision = classifyUserIntent(input, contextTurns);
 
-    // High confidence deterministic fast-path (e.g., pure greeting "Hello" or explicit code "run sandbox")
+    // High confidence deterministic fast-path
     if (fastDecision.confidence >= 0.95) {
         return fastDecision;
     }
@@ -316,23 +379,46 @@ export async function classifyUserIntentAsync(
         const router = ModelRouter.getInstance();
 
         const contextSnippet = contextTurns && contextTurns.length > 0
-            ? "\nRecent Conversation:\n" + contextTurns.slice(-3).map(t => typeof t === "string" ? t : `User: ${t.user || ""}\nBot: ${t.bot || ""}`).join("\n")
+            ? "\nRecent Conversation History:\n" + contextTurns.slice(-4).map((t, idx) => {
+                const u = typeof t === "string" ? t : (t.user || "");
+                const b = typeof t === "string" ? "" : (t.bot || "");
+                return `Turn ${idx + 1}:\nUser: ${u}\nAssistant: ${b ? b.slice(0, 160) + "..." : ""}`;
+            }).join("\n\n")
             : "";
 
         const systemPrompt = `You are the Intent Classification Router for OpenClaw Echo AI agent.
-Analyze the user message and determine the optimal subagent and intent.
+Analyze the user message in the context of recent conversation history to determine the optimal intent and primary subagent.
 
 Available Intents & Agents:
-1. "CONVERSATION" (Agent: "conversation"): Greetings, conversational pleasantries, bot persona questions ("who are you"), chitchat.
-2. "RESEARCH_ONLY" (Agent: "research"): Asking for external facts, real-world knowledge, web search, looking up people/places/repos/projects, news, documentation.
-3. "BROWSER_ONLY" (Agent: "browser"): Explicit URLs, visiting webpages, web scraping.
-4. "CODING_ONLY" (Agent: "coding"): Writing, modifying, executing, or debugging code or sandbox scripts.
-5. "MEMORY_ONLY" (Agent: "memory"): Asking about user's own identity, saved facts, past questions ("what did I ask earlier"), notes.
-6. "GENERAL_TOOL" (Agent: "conversation"): Sending emails, git operations, scheduling tasks, project goals.
-7. "MULTI_AGENT" (Agent: "planner"): Complex multi-step requests requiring multiple distinct capabilities.
+1. "CONVERSATION" (Agent: "conversation"):
+   - Educational or conceptual explanations (e.g. "Explain machine learning in simple words", "How does gravity work?", "What is polymorphism?").
+   - Follow-up questions, elaboration, requests for examples, or clarification on earlier discussion (e.g. "Can you explain that with an example?", "Tell me more", "Why is that?").
+   - Conversational greetings, identity inquiries ("Who are you?"), polite pleasantries, general Q&A.
+
+2. "RESEARCH_ONLY" (Agent: "research"):
+   - Queries requiring live web search, current 2026 events, latest news, market prices, or real-time online documentation.
+   - Explicit user requests to search the web, conduct research, or find external source citations.
+
+3. "CODING_ONLY" (Agent: "coding"):
+   - Requests to write, implement, modify, debug, or execute code, scripts, or sandbox files.
+
+4. "BROWSER_ONLY" (Agent: "browser"):
+   - Explicit URLs (http/https), requests to visit, scrape, or inspect a specific website or online documentation.
+
+5. "MEMORY_ONLY" (Agent: "memory"):
+   - User asking about their own personal profile, saved facts ("remember that...", "what did I say my name was?"), or past questions.
+
+6. "GENERAL_TOOL" (Agent: "conversation"):
+   - Subsystem commands: sending emails, git commands, scheduling tasks, project goals.
+
+7. "MULTI_AGENT" (Agent: "planner"):
+   - Multi-step tasks requiring coordinating research + code generation + verification.
+
+Context Guidelines:
+- If the user's message is a follow-up or request for examples (e.g. "Can you explain that with an example?"), maintain conversation continuity under CONVERSATION unless explicit coding or web search is requested.
 
 Output STRICT JSON only:
-{"intent": "RESEARCH_ONLY", "primaryAgent": "research", "confidence": 0.95, "reason": "concise reason"}`;
+{"intent": "CONVERSATION", "primaryAgent": "conversation", "confidence": 0.95, "reason": "concise explanation"}`;
 
         const timeoutPromise = new Promise<null>((_, reject) => {
             setTimeout(() => reject(new Error("INTENT_ROUTER_TIMEOUT")), 2500);

@@ -111,6 +111,9 @@ export class CodingSubAgent implements WorkerAgent {
                     if (prereqs) {
                         prompt += `\nIntegrate the following research findings and documentation insights into the code design:\n${prereqs.slice(0, 1500)}\n`;
                     }
+                    if (task.contextPayload?.dialogueHistoryFormatted) {
+                        prompt += `\nRecent Conversation Dialogue History:\n${task.contextPayload.dialogueHistoryFormatted.slice(-1500)}\n`;
+                    }
                     prompt += `\nRequirements:
 - Idiomatic ${langInfo.name} syntax, clean functions, and clear inline comments.
 ${langInfo.lang === 'python' ? '- Standalone Python 3 code. Include test cases with print statements demonstrating correctness. Do NOT wrap in TypeScript or JavaScript.' : ''}

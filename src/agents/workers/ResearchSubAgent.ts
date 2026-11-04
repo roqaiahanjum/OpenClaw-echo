@@ -44,6 +44,20 @@ export class ResearchSubAgent implements WorkerAgent {
             if (qMatch && qMatch[1] && qMatch[1].trim().length > 3) {
                 searchQuery = qMatch[1].trim();
             }
+            // Resolve anaphoric pronouns and contextual follow-ups using conversation history
+            const hasAnaphora = /\b(that|it|this|them|the\s+former|the\s+latter)\b/i.test(searchQuery);
+            const isVeryShort = searchQuery.trim().split(/\s+/).length <= 4;
+            if ((hasAnaphora || isVeryShort) && task.contextPayload?.dialogueHistory && Array.isArray(task.contextPayload.dialogueHistory) && task.contextPayload.dialogueHistory.length > 0) {
+                const history = task.contextPayload.dialogueHistory;
+                const lastTurn = history[history.length - 1];
+                const lastUser = typeof lastTurn === "string" ? lastTurn : (lastTurn.user || "");
+                if (lastUser) {
+                    const cleanPrior = lastUser.replace(/^(?:can you\s+)?(?:explain|tell me about|what is|how does|search for|research)\s+/i, "").replace(/[?.!]+$/, "").trim();
+                    if (cleanPrior) {
+                        searchQuery = `${cleanPrior} ${searchQuery.replace(/\b(?:that|it|this)\b/gi, "").trim()}`.trim();
+                    }
+                }
+            }
 
             const webSearchTool = SkillRegistry.getToolByName("web_search");
             let isErrorSnippet = false;
@@ -185,7 +199,7 @@ CRITICAL GROUNDING RULES:
                 verified: toolSuccess,
                 verificationReason: toolSuccess ? `Web search gathered ${verifiedSources.length} verified sources and synthesized grounded response` : "Web search API unavailable or returned empty result",
                 resultData: toolSuccess 
-                    ? `### Research Synthesis\n\n${synthesis.trim()}` 
+                    ? synthesis.trim() 
                     : (isErrorSnippet
                         ? `⚠️ [ResearchSubAgent Execution Error]: Search tool returned an error: ${webResults}` 
                         : `No live web search results found for this query.`),

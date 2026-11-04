@@ -7,9 +7,10 @@ import { ToolExecutionContract } from "../../core/toolExecutionContract";
 /**
  * ConversationSubAgent
  *
- * Dedicated subagent for greetings, identity queries, and general conversational interactions.
+ * Dedicated subagent for conversation, educational explanations, conceptual Q&A,
+ * follow-up clarifications/examples, greetings, and persona interactions.
  * Mandatory Rule: Must invoke the local `get_conversation_context` tool to retrieve
- * persona, active capabilities, and local memory before generating the final answer.
+ * persona, active capabilities, and local dialogue history before generating the final answer.
  */
 export class ConversationSubAgent implements WorkerAgent {
     public readonly agentType = "conversation" as const;
@@ -57,13 +58,16 @@ export class ConversationSubAgent implements WorkerAgent {
 
             console.log(`[StructuredLog] [TaskId:${task.taskId}] [Agent:ConversationSubAgent] [Tool:get_conversation_context] [Status:${isToolSuccess ? 'SUCCESS' : 'FAILED'}] [DurationMs:${toolDuration}]`);
 
-            // 2. Synthesize Grounded Conversational Response
+            // 2. Combine dialogue history from tool context and in-memory payload
+            const dialogueHistoryCombined = parsedContext.recentDialogue || task.contextPayload?.dialogueHistoryFormatted || "";
+
+            // 3. Synthesize Grounded Conversational Response
             let responseText = "";
             const router = ModelRouter.getInstance();
 
             try {
-                const systemPrompt = `You are OpenClaw Echo, a helpful autonomous multi-agent AI assistant.
-Answer the user's conversational greeting or query politely, concisely (max 2-3 sentences), grounded in this verified local context and conversation history.
+                const systemPrompt = `You are OpenClaw Echo, an intelligent, helpful, and articulate autonomous AI assistant.
+Respond to the user naturally, accurately, and thoughtfully, grounded in the verified conversation context and dialogue history.
 
 Context:
 - Timestamp: ${parsedContext.timestamp || new Date().toISOString()}
@@ -71,19 +75,30 @@ Context:
 - Memory Facts Count: ${parsedContext.matchedFactsCount ?? 0}
 ${parsedContext.sampleFacts && parsedContext.sampleFacts.length > 0 ? `- Known user facts: ${parsedContext.sampleFacts.join("; ")}` : ""}
 
-${parsedContext.recentDialogue ? `=== Recent Conversation Dialogue History ===\n${parsedContext.recentDialogue}\n` : ""}
+${dialogueHistoryCombined ? `=== Recent Conversation Dialogue History ===\n${dialogueHistoryCombined}\n` : ""}
 ${parsedContext.recentQuestions ? `=== Recent Questions Asked by User ===\n${parsedContext.recentQuestions}\n` : ""}
 ${task.contextPayload?.context ? `=== Memory Context ===\n${task.contextPayload.context}\n` : ""}
 
 Guidelines:
-- If the user asks what they previously asked or questions about previous context, refer directly to the Recent Questions and Recent Conversation Dialogue History above.
-- Never state that the user hasn't asked anything if recent messages are present in the history.
-- Never claim you lack capabilities. Be brief, professional, and direct.
+1. Direct & Relevant Answers:
+   - Answer the user's actual question directly and immediately.
+   - For educational or conceptual questions (e.g. "Explain X in simple words"), provide a clear, intuitive, and easy-to-understand explanation using accessible analogies.
+   - For follow-up questions (e.g. "Can you explain that with an example?", "Tell me more", "Why is that?", "How does it work?"), carefully inspect the Recent Conversation Dialogue History above, resolve pronouns and anaphoric references (such as "that", "it") to the subject previously discussed, and continue the explanation with concrete, real-world examples.
+   - For greetings or pleasantries, be warm, polite, and brief (1-3 sentences).
 
-CRITICAL ANTI-EVASION & TRUTHFULNESS RULES:
-- NEVER pretend to perform future or offline actions (e.g. NEVER say "Sure, I'll review the recent failure logs...", "I will inspect...", or "Let me know if you'd like me to include logs").
-- NEVER make false promises or tell the user you are checking something unless a tool has actually executed.
-- If the user asks about or asserts system reliability properties (e.g., failure truthfulness or duplicate reply prevention), state factually and directly what the system guarantees: OpenClaw Echo enforces truthful failure reporting without silent fallbacks, and uses request deduplication caching to guarantee no duplicate replies are sent.`;
+2. Context & Continuity:
+   - If the user asks what they previously asked or questions about previous context, refer directly to the Recent Questions and Recent Conversation Dialogue History above.
+   - Never claim you lack context or that the user has not asked anything if previous turns appear in the dialogue history.
+
+3. Formatting:
+   - Use clean, Telegram-friendly Markdown: bold key concepts, use bullet points for lists, and keep paragraphs well-spaced.
+   - Do NOT include raw JSON, internal tool metadata, or synthetic headers like "### Research Synthesis".
+   - Include citations only when referencing specific external sources provided in context.
+
+4. Anti-Evasion & Truthfulness:
+   - NEVER pretend to perform future or offline actions.
+   - NEVER make false promises or claim you are checking something unless a tool has actually executed.
+   - If the user asks about system reliability properties, state factually what the system guarantees: OpenClaw Echo enforces truthful failure reporting without silent fallbacks, and uses request deduplication caching to guarantee no duplicate replies are sent.`;
 
                 const messages = [
                     new SystemMessage(systemPrompt),
@@ -108,24 +123,23 @@ CRITICAL ANTI-EVASION & TRUTHFULNESS RULES:
             return {
                 taskId: task.taskId,
                 targetAgent: this.agentType,
-                status: "SUCCESS",
+                status: isToolSuccess ? "SUCCESS" : "FAILED",
                 toolName: "get_conversation_context",
-                toolOutput: parsedContext,
+                toolOutput: rawToolOutput,
                 verified: isToolSuccess,
-                verificationReason: isToolSuccess ? "Local conversational context retrieved and verified" : "Context retrieved with partial degradation",
+                verificationReason: isToolSuccess ? "Conversation context retrieved and synthesized successfully" : "Context tool execution failed",
                 resultData: responseText,
                 executionTimeMs: Date.now() - startTime
             };
 
         } catch (error: any) {
-            console.error(`[ConversationSubAgent] Task ${task.taskId} failed:`, error);
+            console.error(`[ConversationSubAgent] Error during task execution:`, error.message);
             return {
                 taskId: task.taskId,
                 targetAgent: this.agentType,
                 status: "FAILED",
-                toolName: "get_conversation_context",
                 error: error.message,
-                resultData: `⚠️ [ConversationSubAgent Failed]: ${error.message}`,
+                resultData: `⚠️ [ConversationSubAgent Error]: ${error.message}`,
                 executionTimeMs: Date.now() - startTime
             };
         }
