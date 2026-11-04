@@ -992,6 +992,12 @@ bot.use(async (ctx: Context, next: () => Promise<void>) => {
         return next();
     }
 
+    // Fail closed: If auth is configured but storage/cache is not yet initialized, block protected traffic
+    if (!authManager.isReady()) {
+        await ctx.reply("⚠️ *Authentication Service Temporarily Unavailable*\n\nThe database authorization store is currently reconnecting or uninitialized. Protected operations are suspended until persistent storage is restored.", { parse_mode: "Markdown" });
+        return;
+    }
+
     const isAuthorized = authManager.isUserAuthorized(userId);
     const messageText = (ctx.message as any)?.text?.trim();
 
@@ -1531,15 +1537,26 @@ app.get("/readyz", async (req: Request, res: Response) => {
     try {
         const memoryOk = await memory.checkHealth().then(h => h.sqlite.status === "connected").catch(() => false);
         const routerOk = await router.checkHealth().then(h => (h.gemini?.status === "connected" || h.gemini?.status === "healthy") || (h.groq?.status === "connected" || h.groq?.status === "healthy")).catch(() => false);
-        if (memoryOk) {
+        const authOk = !authManager.isAuthEnabled() || authManager.isReady();
+
+        const isFullyReady = memoryOk && routerOk && authOk;
+
+        if (isFullyReady) {
             res.status(200).json({
                 status: "ready",
                 database: "connected",
-                router: routerOk ? "connected" : "degraded",
+                router: "connected",
+                auth: authManager.isAuthEnabled() ? "ready" : "disabled",
                 timestamp: new Date().toISOString()
             });
         } else {
-            res.status(503).json({ status: "not_ready", database: "disconnected" });
+            res.status(503).json({
+                status: "not_ready",
+                database: memoryOk ? "connected" : "disconnected",
+                router: routerOk ? "connected" : "degraded",
+                auth: authManager.isAuthEnabled() ? (authOk ? "ready" : "uninitialized") : "disabled",
+                timestamp: new Date().toISOString()
+            });
         }
     } catch (e: any) {
         res.status(503).json({ status: "error", error: e.message });
@@ -1567,7 +1584,11 @@ export const startServer = async (initialPort?: number) => {
     }
 
     // Initialize Auth Persistence & Preload Active Users Cache
-    await authManager.init();
+    try {
+        await authManager.init();
+    } catch (err: any) {
+        console.error(`[Auth] Warning: AuthManager schema initialization failed: ${err.message}. Continuing with in-memory auth cache.`);
+    }
 
     const mode = (process.env.TELEGRAM_MODE || "polling").toLowerCase();
     const basePort = initialPort || parseInt(process.env.PORT || "3005");

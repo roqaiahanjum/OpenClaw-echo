@@ -207,32 +207,50 @@ export class AuthManager {
         if (this.initPromise) return this.initPromise;
 
         this.initPromise = (async () => {
-            try {
-                await this.db.exec(`
-                    CREATE TABLE IF NOT EXISTS authorized_users (
-                        user_id TEXT PRIMARY KEY,
-                        username TEXT,
-                        first_name TEXT,
-                        authorized_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                        status TEXT DEFAULT 'active'
-                    )
-                `);
+            const MAX_INIT_ATTEMPTS = 3;
+            let lastError: any = null;
 
-                const rows = await this.db.all<{ user_id: string }>(
-                    `SELECT user_id FROM authorized_users WHERE status = 'active'`
-                );
-                if (rows) {
-                    rows.forEach(r => this.authorizedCache.add(String(r.user_id)));
-                    console.log(`[Auth] Loaded ${this.authorizedCache.size} authorized user(s) into cache.`);
+            for (let attempt = 1; attempt <= MAX_INIT_ATTEMPTS; attempt++) {
+                try {
+                    await this.db.exec(`
+                        CREATE TABLE IF NOT EXISTS authorized_users (
+                            user_id TEXT PRIMARY KEY,
+                            username TEXT,
+                            first_name TEXT,
+                            authorized_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                            status TEXT DEFAULT 'active'
+                        )
+                    `);
+
+                    const rows = await this.db.all<{ user_id: string }>(
+                        `SELECT user_id FROM authorized_users WHERE status = 'active'`
+                    );
+                    if (rows) {
+                        rows.forEach(r => this.authorizedCache.add(String(r.user_id)));
+                        console.log(`[Auth] Loaded ${this.authorizedCache.size} authorized user(s) into cache.`);
+                    }
+                    this.isInitialized = true;
+                    return;
+                } catch (err: any) {
+                    lastError = err;
+                    console.warn(`[Auth] Database initialization attempt ${attempt}/${MAX_INIT_ATTEMPTS} failed: ${err.message}`);
+                    if (attempt < MAX_INIT_ATTEMPTS) {
+                        await new Promise(r => setTimeout(r, 400 * attempt));
+                    }
                 }
-                this.isInitialized = true;
-            } catch (err: any) {
-                console.error("[Auth] Database initialization error:", err.message);
-                throw err;
             }
+
+            // Reset initPromise so future attempts can retry rather than being stuck on rejected promise
+            this.initPromise = null;
+            console.error("[Auth] Database initialization failed after retries:", lastError?.message || lastError);
+            throw lastError;
         })();
 
         return this.initPromise;
+    }
+
+    public isReady(): boolean {
+        return this.isInitialized;
     }
 
     /**
@@ -260,6 +278,7 @@ export class AuthManager {
      * Returns true if the user is authorized to interact with the bot.
      * Administrators and already-authenticated users pass immediately.
      * If authentication is not configured in env, access remains open.
+     * CRITICAL: If auth is configured but uninitialized, access is strictly rejected (fails closed).
      */
     public isUserAuthorized(userId: string | number | undefined): boolean {
         if (!userId) return false;
@@ -268,6 +287,12 @@ export class AuthManager {
         // If auth is not configured, permit access (fail-open for standard development)
         if (!this.isAuthEnabled()) {
             return true;
+        }
+
+        // FAIL CLOSED: If auth is configured in env but database/cache is not initialized,
+        // strictly reject access until persistence is restored.
+        if (!this.isInitialized) {
+            return false;
         }
 
         // Administrators bypass access codes

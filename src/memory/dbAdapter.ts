@@ -212,6 +212,76 @@ export class TursoDatabaseAdapter implements IDatabaseConnection {
         return "turso";
     }
 
+    private isRetryableTransportError(err: any): boolean {
+        if (!err) return false;
+        const msg = (err.message || "").toLowerCase();
+        const code = err.code || err.cause?.code || "";
+        const causeMsg = (err.cause?.message || "").toLowerCase();
+
+        // Socket closed by other side (UND_ERR_SOCKET, SocketError)
+        if (code === "UND_ERR_SOCKET" || msg.includes("other side closed") || causeMsg.includes("other side closed") || msg.includes("socket closed")) {
+            return true;
+        }
+
+        // Connect timeout / network timeout / aborted timeout
+        if (code === "UND_ERR_CONNECT_TIMEOUT" || code === "ETIMEDOUT" || err.name === "AbortError" || msg.includes("timeout") || causeMsg.includes("timeout")) {
+            return true;
+        }
+
+        // Network connection reset or abort
+        if (code === "ECONNRESET" || code === "EPIPE" || code === "ENOTFOUND" || code === "EAI_AGAIN") {
+            return true;
+        }
+
+        // Generic fetch failed wrapper with underlying transport cause
+        if (msg.includes("fetch failed") && (code === "UND_ERR_SOCKET" || causeMsg.includes("socket") || causeMsg.includes("closed") || causeMsg.includes("timeout") || causeMsg.includes("connect"))) {
+            return true;
+        }
+
+        // 502/503/504 gateway errors
+        if (msg.includes("turso gateway error") || msg.includes("502") || msg.includes("503") || msg.includes("504")) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private isSafeToReplay(requests: any[]): boolean {
+        if (!Array.isArray(requests) || requests.length === 0) return false;
+
+        for (const req of requests) {
+            const rawSql = (req?.stmt?.sql || "").trim();
+            if (!rawSql) return false;
+            // Normalize whitespace and uppercase for keyword inspection
+            const sql = rawSql.replace(/\s+/g, " ").toUpperCase();
+
+            // 1. Read-only queries are always safe to replay
+            if (sql.startsWith("SELECT") || sql.startsWith("PRAGMA") || sql.startsWith("EXPLAIN")) {
+                continue;
+            }
+
+            // 2. Safe idempotent DDL
+            if (
+                sql.startsWith("CREATE TABLE IF NOT EXISTS") ||
+                sql.startsWith("CREATE INDEX IF NOT EXISTS") ||
+                sql.startsWith("DROP TABLE IF EXISTS") ||
+                sql.startsWith("DROP INDEX IF EXISTS")
+            ) {
+                continue;
+            }
+
+            // 3. Safe idempotent writes with conflict-ignore or conflict-replace
+            if (sql.startsWith("INSERT OR IGNORE") || sql.startsWith("INSERT OR REPLACE")) {
+                continue;
+            }
+
+            // Any standard INSERT, UPDATE, DELETE, or arbitrary non-idempotent DDL is NOT safe to replay
+            return false;
+        }
+
+        return true;
+    }
+
     private async executeHttpPipeline(requests: any[]): Promise<any> {
         // Convert libsql:// to https://
         let httpEndpoint = this.url.replace(/^libsql:\/\//, "https://");
@@ -220,22 +290,78 @@ export class TursoDatabaseAdapter implements IDatabaseConnection {
         }
         const pipelineUrl = `${httpEndpoint.replace(/\/+$/, "")}/v2/pipeline`;
 
-        const res = await fetch(pipelineUrl, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                ...(this.authToken ? { Authorization: `Bearer ${this.authToken}` } : {})
-            },
-            body: JSON.stringify({ requests })
-        });
+        const isReplayable = this.isSafeToReplay(requests);
+        const MAX_RETRIES = isReplayable ? 3 : 1;
+        let lastError: any = null;
 
-        if (!res.ok) {
-            const errBody = await res.text();
-            throw new Error(`Turso HTTP Pipeline error (${res.status}): ${errBody}`);
+        for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 12000);
+
+            try {
+                const res = await fetch(pipelineUrl, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Connection": "keep-alive",
+                        ...(this.authToken ? { Authorization: `Bearer ${this.authToken}` } : {})
+                    },
+                    body: JSON.stringify({ requests }),
+                    signal: controller.signal
+                });
+
+                if (!res.ok) {
+                    const errBody = await res.text();
+                    // 401/403 are terminal auth errors; do not retry
+                    if (res.status === 401 || res.status === 403) {
+                        throw new Error(`Turso Authentication Error (${res.status}): Invalid or unauthorized TURSO_AUTH_TOKEN. Non-retryable.`);
+                    }
+                    // 400 is terminal syntax error; do not retry
+                    if (res.status === 400) {
+                        throw new Error(`Turso SQL/Validation Error (${res.status}): ${errBody.slice(0, 250)}`);
+                    }
+                    // 502/503/504 are retryable gateway errors
+                    if (res.status === 502 || res.status === 503 || res.status === 504) {
+                        throw new Error(`Turso Gateway Error (${res.status}): ${errBody.slice(0, 250)}`);
+                    }
+                    throw new Error(`Turso HTTP Pipeline error (${res.status}): ${errBody.slice(0, 250)}`);
+                }
+
+                const data: any = await res.json();
+                return data;
+            } catch (err: any) {
+                lastError = err;
+
+                // Terminal auth or bad request errors must NOT be retried
+                const errMsg = err?.message || String(err);
+                if (errMsg.includes("Turso Authentication Error") || errMsg.includes("Turso SQL/Validation Error")) {
+                    throw err;
+                }
+
+                // If non-idempotent write encountered a transport failure, NEVER replay (avoid duplicate side effects)
+                if (!isReplayable) {
+                    throw new Error(`Turso Ambiguous Transport Failure: Non-idempotent write encountered transport error (${err.message || err}). Automatic replay prohibited to prevent duplicate writes.`);
+                }
+
+                // Check for retryable socket/transport errors on safe replayable queries
+                const isRetryable = this.isRetryableTransportError(err);
+                if (isRetryable && attempt < MAX_RETRIES) {
+                    const backoffMs = Math.min(2500, (300 * Math.pow(2, attempt - 1))) + Math.floor(Math.random() * 200);
+                    console.warn(`[TursoAdapter] Transient socket/transport error on attempt ${attempt}/${MAX_RETRIES}: ${err.message || err}. Retrying on fresh connection in ${backoffMs}ms...`);
+                    await new Promise(r => setTimeout(r, backoffMs));
+                    continue;
+                }
+
+                if (!isRetryable) {
+                    throw err;
+                }
+            } finally {
+                // Guarantee timeout cleanup in all execution paths
+                clearTimeout(timeoutId);
+            }
         }
 
-        const data: any = await res.json();
-        return data;
+        throw new Error(`Turso HTTP Pipeline failed after ${MAX_RETRIES} attempts. Last error: ${lastError?.message || lastError}`);
     }
 
     public serialize(fn: () => void): void {

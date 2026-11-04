@@ -64,7 +64,13 @@ export class StartupValidator {
             const conn = DatabaseConnectionFactory.getConnection();
             const health = await conn.checkHealth();
             if (health.status === "connected") {
-                dbHealth = { status: "HEALTHY", details: `Connected (${conn.getDriverName()})` };
+                try {
+                    const { AuthManager } = await import("./auth");
+                    await AuthManager.getInstance().init();
+                    dbHealth = { status: "HEALTHY", details: `Connected & schemas initialized (${conn.getDriverName()})` };
+                } catch (schemaErr: any) {
+                    dbHealth = { status: "DEGRADED", details: `Connected but schema init degraded: ${schemaErr.message}` };
+                }
             } else {
                 dbHealth = { status: "DEGRADED", details: health.details || "Degraded connection" };
             }
