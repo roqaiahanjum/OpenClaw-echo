@@ -7,6 +7,7 @@ import { SubAgentManager } from './src/agents/SubAgentManager';
 import { writeSandboxFileTool, runSandboxCodeTool } from './src/skills/tools';
 
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+process.env.ENABLE_SANDBOX_EXECUTION = "true";
 
 async function runSecurityIsolationTests() {
     console.log("================================================================================");

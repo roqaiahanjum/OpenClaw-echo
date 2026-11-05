@@ -533,6 +533,12 @@ export const runSandboxCodeTool = tool(
             if (!cleanFileName) {
                 return "Safety Violation: Valid fileName is required.";
             }
+
+            const isExecutionEnabled = process.env.ENABLE_SANDBOX_EXECUTION === "true" || process.env.NODE_ENV === "test";
+            if (!isExecutionEnabled) {
+                return "Security Notice: Untrusted code execution is disabled in public production v1.0.0. Code generation, static syntax analysis, and safe file creation remain fully available.";
+            }
+
             const targetPath = path.resolve(sandboxDir, cleanFileName);
 
             const realSandbox = await fs.realpath(sandboxDir).catch(() => sandboxDir);
