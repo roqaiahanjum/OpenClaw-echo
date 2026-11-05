@@ -405,14 +405,20 @@ export const localFileSystemTool = tool(
  * Allows the agent to write text files strictly inside a safe sandbox directory.
  */
 export const writeSandboxFileTool = tool(
-    async ({ fileName, content }: { fileName: string, content: string }) => {
+    async (args: { fileName?: string; filename?: string; content: string }) => {
         const tStart = Date.now();
-        console.log(`[StructuredLog] [Event:ToolInvoke] [Tool:write_sandbox_file] [FileName:${fileName}]`);
+        const rawFileName = (args.fileName || args.filename || "").trim();
+        const cleanFileName = path.basename(rawFileName);
+        const content = args.content || "";
+        if (!cleanFileName) {
+            return "Safety Violation: Valid fileName is required.";
+        }
+        console.log(`[StructuredLog] [Event:ToolInvoke] [Tool:write_sandbox_file] [FileName:${cleanFileName}]`);
         try {
             const sandboxDir = SANDBOX_DIR;
             await fs.mkdir(sandboxDir, { recursive: true });
 
-            const targetPath = path.resolve(sandboxDir, fileName);
+            const targetPath = path.resolve(sandboxDir, cleanFileName);
 
             // Path containment check against path traversal
             if (!targetPath.startsWith(sandboxDir + path.sep) && targetPath !== sandboxDir) {
@@ -460,7 +466,8 @@ export const writeSandboxFileTool = tool(
         name: "write_sandbox_file",
         description: "Creates or overwrites a text file inside the safe 'src/sandbox' directory. Use this to save reports, generated code, or structured output.",
         schema: z.object({
-            fileName: z.string().describe("Name of the file to save inside src/sandbox (e.g., 'report.txt', 'script.js')."),
+            fileName: z.string().optional().describe("Name of the file to save inside src/sandbox (e.g., 'report.txt', 'script.js')."),
+            filename: z.string().optional().describe("Alternative parameter alias for fileName."),
             content: z.string().describe("The text content to write into the file."),
         }),
     }
@@ -518,10 +525,14 @@ export const updateUserProfileTool = tool(
  * Code Execution Tool (The Sandbox Engine)
  */
 export const runSandboxCodeTool = tool(
-    async ({ fileName }: { fileName: string }) => {
+    async (args: { fileName?: string; filename?: string }) => {
         try {
             const sandboxDir = SANDBOX_DIR;
-            const cleanFileName = path.basename(fileName);
+            const rawFileName = (args.fileName || args.filename || "").trim();
+            const cleanFileName = path.basename(rawFileName);
+            if (!cleanFileName) {
+                return "Safety Violation: Valid fileName is required.";
+            }
             const targetPath = path.resolve(sandboxDir, cleanFileName);
 
             const realSandbox = await fs.realpath(sandboxDir).catch(() => sandboxDir);
@@ -562,14 +573,14 @@ export const runSandboxCodeTool = tool(
 
             console.log(`[Skill] Executing file in sandbox: ${cleanFileName}`);
             const cmd = cleanFileName.endsWith(".ts")
-                ? `npx ts-node "${targetPath}"`
+                ? `npx ts-node --transpile-only "${targetPath}"`
                 : cleanFileName.endsWith(".py")
                     ? `python "${targetPath}"`
                     : `node "${targetPath}"`;
 
             // 2. Execute with isolated SANDBOX_ENV and 256KB maxBuffer (Patch 2)
             const { stdout, stderr } = await execAsync(cmd, {
-                timeout: 8000,
+                timeout: 15000,
                 maxBuffer: 256 * 1024,
                 env: SANDBOX_ENV
             });
@@ -588,6 +599,9 @@ export const runSandboxCodeTool = tool(
             if (error.stdout) {
                 return `Execution error (${error.message}):\nOutput:\n${truncateSandboxOutput(error.stdout)}`;
             }
+            if (error.killed) {
+                return `Execution timed out (exceeded limit of 15000ms): ${error.message}`;
+            }
             return `Execution failed: ${error.message}`;
         }
     },
@@ -595,7 +609,8 @@ export const runSandboxCodeTool = tool(
         name: "run_sandbox_code",
         description: "Executes a JavaScript (.js) or TypeScript (.ts) file in the local sandbox and returns the output. Use this to perform calculations, process data, or verify logic.",
         schema: z.object({
-            fileName: z.string().describe("The name of the .js or .ts file in the sandbox (e.g., 'script.js', 'logic.ts').")
+            fileName: z.string().optional().describe("The name of the .js, .ts, or .py file in the sandbox (e.g., 'script.js', 'logic.ts', 'calc.py')."),
+            filename: z.string().optional().describe("Alternative parameter alias for fileName.")
         })
     }
 );

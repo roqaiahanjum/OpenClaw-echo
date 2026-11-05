@@ -58,8 +58,11 @@ export class ConversationSubAgent implements WorkerAgent {
 
             console.log(`[StructuredLog] [TaskId:${task.taskId}] [Agent:ConversationSubAgent] [Tool:get_conversation_context] [Status:${isToolSuccess ? 'SUCCESS' : 'FAILED'}] [DurationMs:${toolDuration}]`);
 
-            // 2. Combine dialogue history from tool context and in-memory payload
-            const dialogueHistoryCombined = parsedContext.recentDialogue || task.contextPayload?.dialogueHistoryFormatted || "";
+            // 2. Combine dialogue history from tool context and in-memory payload (prioritizing task payload if explicitly supplied)
+            const dialogueHistoryCombined = [
+                task.contextPayload?.dialogueHistoryFormatted,
+                parsedContext.recentDialogue
+            ].filter(Boolean).join("\n---\n") || "";
 
             // 3. Synthesize Grounded Conversational Response
             let responseText = "";
