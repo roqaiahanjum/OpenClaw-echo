@@ -1,0 +1,776 @@
+[
+  {
+    "queryId": "RET_SH_01",
+    "queryText": "Retrieve 1-hop direct relational neighbors for entity: Waterfall_Router",
+    "queryType": "SINGLE_HOP",
+    "seedEntities": [
+      "Waterfall_Router"
+    ],
+    "maxDepth": 1,
+    "groundTruthRelevantTripleIds": [
+      "rel_01",
+      "rel_05",
+      "rel_06",
+      "rel_07"
+    ]
+  },
+  {
+    "queryId": "RET_SH_02",
+    "queryText": "Retrieve 1-hop direct relational neighbors for entity: SubAgent_Swarm",
+    "queryType": "SINGLE_HOP",
+    "seedEntities": [
+      "SubAgent_Swarm"
+    ],
+    "maxDepth": 1,
+    "groundTruthRelevantTripleIds": [
+      "rel_04",
+      "rel_12",
+      "rel_13",
+      "rel_14"
+    ]
+  },
+  {
+    "queryId": "RET_SH_03",
+    "queryText": "Retrieve 1-hop direct relational neighbors for entity: Dual_Tier_Verifier",
+    "queryType": "SINGLE_HOP",
+    "seedEntities": [
+      "Dual_Tier_Verifier"
+    ],
+    "maxDepth": 1,
+    "groundTruthRelevantTripleIds": [
+      "rel_03",
+      "rel_17",
+      "rel_18"
+    ]
+  },
+  {
+    "queryId": "RET_SH_04",
+    "queryText": "Retrieve 1-hop direct relational neighbors for entity: Telegram_Integration",
+    "queryType": "SINGLE_HOP",
+    "seedEntities": [
+      "Telegram_Integration"
+    ],
+    "maxDepth": 1,
+    "groundTruthRelevantTripleIds": [
+      "rel_21",
+      "rel_22",
+      "rel_23"
+    ]
+  },
+  {
+    "queryId": "RET_SH_05",
+    "queryText": "Retrieve 1-hop direct relational neighbors for entity: SQLite_Storage",
+    "queryType": "SINGLE_HOP",
+    "seedEntities": [
+      "SQLite_Storage"
+    ],
+    "maxDepth": 1,
+    "groundTruthRelevantTripleIds": [
+      "rel_24",
+      "rel_25",
+      "rel_26"
+    ]
+  },
+  {
+    "queryId": "RET_SH_06",
+    "queryText": "Retrieve 1-hop direct relational neighbors for entity: Circuit_Breaker",
+    "queryType": "SINGLE_HOP",
+    "seedEntities": [
+      "Circuit_Breaker"
+    ],
+    "maxDepth": 1,
+    "groundTruthRelevantTripleIds": [
+      "rel_07",
+      "rel_08",
+      "rel_09"
+    ]
+  },
+  {
+    "queryId": "RET_SH_07",
+    "queryText": "Retrieve 1-hop direct relational neighbors for entity: GraphRAG_Memory",
+    "queryType": "SINGLE_HOP",
+    "seedEntities": [
+      "GraphRAG_Memory"
+    ],
+    "maxDepth": 1,
+    "groundTruthRelevantTripleIds": [
+      "rel_02",
+      "rel_10",
+      "rel_11"
+    ]
+  },
+  {
+    "queryId": "RET_SH_08",
+    "queryText": "Retrieve 1-hop direct relational neighbors for entity: LocalVerifier",
+    "queryType": "SINGLE_HOP",
+    "seedEntities": [
+      "LocalVerifier"
+    ],
+    "maxDepth": 1,
+    "groundTruthRelevantTripleIds": [
+      "rel_17",
+      "rel_19",
+      "rel_20"
+    ]
+  },
+  {
+    "queryId": "RET_SH_09",
+    "queryText": "Retrieve 1-hop direct relational neighbors for entity: ResearchSubAgent",
+    "queryType": "SINGLE_HOP",
+    "seedEntities": [
+      "ResearchSubAgent"
+    ],
+    "maxDepth": 1,
+    "groundTruthRelevantTripleIds": [
+      "rel_12",
+      "rel_27",
+      "rel_28"
+    ]
+  },
+  {
+    "queryId": "RET_SH_10",
+    "queryText": "Retrieve 1-hop direct relational neighbors for entity: Recovery_Engine",
+    "queryType": "SINGLE_HOP",
+    "seedEntities": [
+      "Recovery_Engine"
+    ],
+    "maxDepth": 1,
+    "groundTruthRelevantTripleIds": [
+      "rel_29",
+      "rel_30",
+      "rel_31",
+      "rel_32",
+      "rel_33"
+    ]
+  },
+  {
+    "queryId": "RET_TH_01",
+    "queryText": "Execute 2-hop BFS sub-graph expansion centered on: OpenClaw_Echo (Trial 1)",
+    "queryType": "TWO_HOP",
+    "seedEntities": [
+      "OpenClaw_Echo"
+    ],
+    "maxDepth": 2,
+    "groundTruthRelevantTripleIds": [
+      "rel_01",
+      "rel_02",
+      "rel_03",
+      "rel_04",
+      "rel_05",
+      "rel_06",
+      "rel_07",
+      "rel_10",
+      "rel_11",
+      "rel_12",
+      "rel_13",
+      "rel_14",
+      "rel_17",
+      "rel_18"
+    ]
+  },
+  {
+    "queryId": "RET_TH_02",
+    "queryText": "Execute 2-hop BFS sub-graph expansion centered on: Circuit_Breaker (Trial 2)",
+    "queryType": "TWO_HOP",
+    "seedEntities": [
+      "Circuit_Breaker"
+    ],
+    "maxDepth": 2,
+    "groundTruthRelevantTripleIds": [
+      "rel_07",
+      "rel_08",
+      "rel_09",
+      "rel_01",
+      "rel_05",
+      "rel_06"
+    ]
+  },
+  {
+    "queryId": "RET_TH_03",
+    "queryText": "Execute 2-hop BFS sub-graph expansion centered on: CodingSubAgent (Trial 3)",
+    "queryType": "TWO_HOP",
+    "seedEntities": [
+      "CodingSubAgent"
+    ],
+    "maxDepth": 2,
+    "groundTruthRelevantTripleIds": [
+      "rel_13",
+      "rel_15",
+      "rel_04",
+      "rel_12",
+      "rel_14"
+    ]
+  },
+  {
+    "queryId": "RET_TH_04",
+    "queryText": "Execute 2-hop BFS sub-graph expansion centered on: BrowserSubAgent (Trial 4)",
+    "queryType": "TWO_HOP",
+    "seedEntities": [
+      "BrowserSubAgent"
+    ],
+    "maxDepth": 2,
+    "groundTruthRelevantTripleIds": [
+      "rel_14",
+      "rel_16",
+      "rel_04",
+      "rel_12",
+      "rel_13"
+    ]
+  },
+  {
+    "queryId": "RET_TH_05",
+    "queryText": "Execute 2-hop BFS sub-graph expansion centered on: LocalVerifier (Trial 5)",
+    "queryType": "TWO_HOP",
+    "seedEntities": [
+      "LocalVerifier"
+    ],
+    "maxDepth": 2,
+    "groundTruthRelevantTripleIds": [
+      "rel_17",
+      "rel_19",
+      "rel_20",
+      "rel_03",
+      "rel_18"
+    ]
+  },
+  {
+    "queryId": "RET_TH_06",
+    "queryText": "Execute 2-hop BFS sub-graph expansion centered on: OpenClaw_Echo (Trial 6)",
+    "queryType": "TWO_HOP",
+    "seedEntities": [
+      "OpenClaw_Echo"
+    ],
+    "maxDepth": 2,
+    "groundTruthRelevantTripleIds": [
+      "rel_01",
+      "rel_02",
+      "rel_03",
+      "rel_04",
+      "rel_05",
+      "rel_06",
+      "rel_07",
+      "rel_10",
+      "rel_11",
+      "rel_12",
+      "rel_13",
+      "rel_14",
+      "rel_17",
+      "rel_18"
+    ]
+  },
+  {
+    "queryId": "RET_TH_07",
+    "queryText": "Execute 2-hop BFS sub-graph expansion centered on: Circuit_Breaker (Trial 7)",
+    "queryType": "TWO_HOP",
+    "seedEntities": [
+      "Circuit_Breaker"
+    ],
+    "maxDepth": 2,
+    "groundTruthRelevantTripleIds": [
+      "rel_07",
+      "rel_08",
+      "rel_09",
+      "rel_01",
+      "rel_05",
+      "rel_06"
+    ]
+  },
+  {
+    "queryId": "RET_TH_08",
+    "queryText": "Execute 2-hop BFS sub-graph expansion centered on: CodingSubAgent (Trial 8)",
+    "queryType": "TWO_HOP",
+    "seedEntities": [
+      "CodingSubAgent"
+    ],
+    "maxDepth": 2,
+    "groundTruthRelevantTripleIds": [
+      "rel_13",
+      "rel_15",
+      "rel_04",
+      "rel_12",
+      "rel_14"
+    ]
+  },
+  {
+    "queryId": "RET_TH_09",
+    "queryText": "Execute 2-hop BFS sub-graph expansion centered on: BrowserSubAgent (Trial 9)",
+    "queryType": "TWO_HOP",
+    "seedEntities": [
+      "BrowserSubAgent"
+    ],
+    "maxDepth": 2,
+    "groundTruthRelevantTripleIds": [
+      "rel_14",
+      "rel_16",
+      "rel_04",
+      "rel_12",
+      "rel_13"
+    ]
+  },
+  {
+    "queryId": "RET_TH_10",
+    "queryText": "Execute 2-hop BFS sub-graph expansion centered on: LocalVerifier (Trial 10)",
+    "queryType": "TWO_HOP",
+    "seedEntities": [
+      "LocalVerifier"
+    ],
+    "maxDepth": 2,
+    "groundTruthRelevantTripleIds": [
+      "rel_17",
+      "rel_19",
+      "rel_20",
+      "rel_03",
+      "rel_18"
+    ]
+  },
+  {
+    "queryId": "RET_TH_11",
+    "queryText": "Execute 2-hop BFS sub-graph expansion centered on: OpenClaw_Echo (Trial 11)",
+    "queryType": "TWO_HOP",
+    "seedEntities": [
+      "OpenClaw_Echo"
+    ],
+    "maxDepth": 2,
+    "groundTruthRelevantTripleIds": [
+      "rel_01",
+      "rel_02",
+      "rel_03",
+      "rel_04",
+      "rel_05",
+      "rel_06",
+      "rel_07",
+      "rel_10",
+      "rel_11",
+      "rel_12",
+      "rel_13",
+      "rel_14",
+      "rel_17",
+      "rel_18"
+    ]
+  },
+  {
+    "queryId": "RET_TH_12",
+    "queryText": "Execute 2-hop BFS sub-graph expansion centered on: Circuit_Breaker (Trial 12)",
+    "queryType": "TWO_HOP",
+    "seedEntities": [
+      "Circuit_Breaker"
+    ],
+    "maxDepth": 2,
+    "groundTruthRelevantTripleIds": [
+      "rel_07",
+      "rel_08",
+      "rel_09",
+      "rel_01",
+      "rel_05",
+      "rel_06"
+    ]
+  },
+  {
+    "queryId": "RET_TH_13",
+    "queryText": "Execute 2-hop BFS sub-graph expansion centered on: CodingSubAgent (Trial 13)",
+    "queryType": "TWO_HOP",
+    "seedEntities": [
+      "CodingSubAgent"
+    ],
+    "maxDepth": 2,
+    "groundTruthRelevantTripleIds": [
+      "rel_13",
+      "rel_15",
+      "rel_04",
+      "rel_12",
+      "rel_14"
+    ]
+  },
+  {
+    "queryId": "RET_TH_14",
+    "queryText": "Execute 2-hop BFS sub-graph expansion centered on: BrowserSubAgent (Trial 14)",
+    "queryType": "TWO_HOP",
+    "seedEntities": [
+      "BrowserSubAgent"
+    ],
+    "maxDepth": 2,
+    "groundTruthRelevantTripleIds": [
+      "rel_14",
+      "rel_16",
+      "rel_04",
+      "rel_12",
+      "rel_13"
+    ]
+  },
+  {
+    "queryId": "RET_TH_15",
+    "queryText": "Execute 2-hop BFS sub-graph expansion centered on: LocalVerifier (Trial 15)",
+    "queryType": "TWO_HOP",
+    "seedEntities": [
+      "LocalVerifier"
+    ],
+    "maxDepth": 2,
+    "groundTruthRelevantTripleIds": [
+      "rel_17",
+      "rel_19",
+      "rel_20",
+      "rel_03",
+      "rel_18"
+    ]
+  },
+  {
+    "queryId": "RET_MS_01",
+    "queryText": "Execute joint multi-seed sub-graph expansion for: [Waterfall_Router, Circuit_Breaker]",
+    "queryType": "MULTI_ENTITY",
+    "seedEntities": [
+      "Waterfall_Router",
+      "Circuit_Breaker"
+    ],
+    "maxDepth": 1,
+    "groundTruthRelevantTripleIds": [
+      "rel_01",
+      "rel_05",
+      "rel_06",
+      "rel_07",
+      "rel_08",
+      "rel_09"
+    ]
+  },
+  {
+    "queryId": "RET_MS_02",
+    "queryText": "Execute joint multi-seed sub-graph expansion for: [ResearchSubAgent, CodingSubAgent]",
+    "queryType": "MULTI_ENTITY",
+    "seedEntities": [
+      "ResearchSubAgent",
+      "CodingSubAgent"
+    ],
+    "maxDepth": 1,
+    "groundTruthRelevantTripleIds": [
+      "rel_12",
+      "rel_13",
+      "rel_15",
+      "rel_27",
+      "rel_28",
+      "rel_04"
+    ]
+  },
+  {
+    "queryId": "RET_MS_03",
+    "queryText": "Execute joint multi-seed sub-graph expansion for: [Telegram_Integration, Web_Dashboard]",
+    "queryType": "MULTI_ENTITY",
+    "seedEntities": [
+      "Telegram_Integration",
+      "Web_Dashboard"
+    ],
+    "maxDepth": 1,
+    "groundTruthRelevantTripleIds": [
+      "rel_21",
+      "rel_22",
+      "rel_23",
+      "rel_35"
+    ]
+  },
+  {
+    "queryId": "RET_MS_04",
+    "queryText": "Execute joint multi-seed sub-graph expansion for: [Dual_Tier_Verifier, LocalVerifier]",
+    "queryType": "MULTI_ENTITY",
+    "seedEntities": [
+      "Dual_Tier_Verifier",
+      "LocalVerifier"
+    ],
+    "maxDepth": 1,
+    "groundTruthRelevantTripleIds": [
+      "rel_03",
+      "rel_17",
+      "rel_18",
+      "rel_19",
+      "rel_20"
+    ]
+  },
+  {
+    "queryId": "RET_MS_05",
+    "queryText": "Execute joint multi-seed sub-graph expansion for: [SQLite_Storage, GraphRAG_Memory]",
+    "queryType": "MULTI_ENTITY",
+    "seedEntities": [
+      "SQLite_Storage",
+      "GraphRAG_Memory"
+    ],
+    "maxDepth": 1,
+    "groundTruthRelevantTripleIds": [
+      "rel_02",
+      "rel_10",
+      "rel_11",
+      "rel_24",
+      "rel_25",
+      "rel_26"
+    ]
+  },
+  {
+    "queryId": "RET_MS_06",
+    "queryText": "Execute joint multi-seed sub-graph expansion for: [Waterfall_Router, Circuit_Breaker]",
+    "queryType": "MULTI_ENTITY",
+    "seedEntities": [
+      "Waterfall_Router",
+      "Circuit_Breaker"
+    ],
+    "maxDepth": 1,
+    "groundTruthRelevantTripleIds": [
+      "rel_01",
+      "rel_05",
+      "rel_06",
+      "rel_07",
+      "rel_08",
+      "rel_09"
+    ]
+  },
+  {
+    "queryId": "RET_MS_07",
+    "queryText": "Execute joint multi-seed sub-graph expansion for: [ResearchSubAgent, CodingSubAgent]",
+    "queryType": "MULTI_ENTITY",
+    "seedEntities": [
+      "ResearchSubAgent",
+      "CodingSubAgent"
+    ],
+    "maxDepth": 1,
+    "groundTruthRelevantTripleIds": [
+      "rel_12",
+      "rel_13",
+      "rel_15",
+      "rel_27",
+      "rel_28",
+      "rel_04"
+    ]
+  },
+  {
+    "queryId": "RET_MS_08",
+    "queryText": "Execute joint multi-seed sub-graph expansion for: [Telegram_Integration, Web_Dashboard]",
+    "queryType": "MULTI_ENTITY",
+    "seedEntities": [
+      "Telegram_Integration",
+      "Web_Dashboard"
+    ],
+    "maxDepth": 1,
+    "groundTruthRelevantTripleIds": [
+      "rel_21",
+      "rel_22",
+      "rel_23",
+      "rel_35"
+    ]
+  },
+  {
+    "queryId": "RET_MS_09",
+    "queryText": "Execute joint multi-seed sub-graph expansion for: [Dual_Tier_Verifier, LocalVerifier]",
+    "queryType": "MULTI_ENTITY",
+    "seedEntities": [
+      "Dual_Tier_Verifier",
+      "LocalVerifier"
+    ],
+    "maxDepth": 1,
+    "groundTruthRelevantTripleIds": [
+      "rel_03",
+      "rel_17",
+      "rel_18",
+      "rel_19",
+      "rel_20"
+    ]
+  },
+  {
+    "queryId": "RET_MS_10",
+    "queryText": "Execute joint multi-seed sub-graph expansion for: [SQLite_Storage, GraphRAG_Memory]",
+    "queryType": "MULTI_ENTITY",
+    "seedEntities": [
+      "SQLite_Storage",
+      "GraphRAG_Memory"
+    ],
+    "maxDepth": 1,
+    "groundTruthRelevantTripleIds": [
+      "rel_02",
+      "rel_10",
+      "rel_11",
+      "rel_24",
+      "rel_25",
+      "rel_26"
+    ]
+  },
+  {
+    "queryId": "RET_SP_01",
+    "queryText": "Retrieve sparse 1-hop neighborhood for: CodingSubAgent (Fewer than 5 items exist)",
+    "queryType": "SPARSE_NEIGHBORS",
+    "seedEntities": [
+      "CodingSubAgent"
+    ],
+    "maxDepth": 1,
+    "groundTruthRelevantTripleIds": [
+      "rel_13",
+      "rel_15"
+    ]
+  },
+  {
+    "queryId": "RET_SP_02",
+    "queryText": "Retrieve sparse 1-hop neighborhood for: BrowserSubAgent (Fewer than 5 items exist)",
+    "queryType": "SPARSE_NEIGHBORS",
+    "seedEntities": [
+      "BrowserSubAgent"
+    ],
+    "maxDepth": 1,
+    "groundTruthRelevantTripleIds": [
+      "rel_14",
+      "rel_16"
+    ]
+  },
+  {
+    "queryId": "RET_SP_03",
+    "queryText": "Retrieve sparse 1-hop neighborhood for: Admin_Panel (Fewer than 5 items exist)",
+    "queryType": "SPARSE_NEIGHBORS",
+    "seedEntities": [
+      "Admin_Panel"
+    ],
+    "maxDepth": 1,
+    "groundTruthRelevantTripleIds": [
+      "rel_34"
+    ]
+  },
+  {
+    "queryId": "RET_SP_04",
+    "queryText": "Retrieve sparse 1-hop neighborhood for: Web_Dashboard (Fewer than 5 items exist)",
+    "queryType": "SPARSE_NEIGHBORS",
+    "seedEntities": [
+      "Web_Dashboard"
+    ],
+    "maxDepth": 1,
+    "groundTruthRelevantTripleIds": [
+      "rel_35"
+    ]
+  },
+  {
+    "queryId": "RET_SP_05",
+    "queryText": "Retrieve sparse 1-hop neighborhood for: Quota_Exhaustion (Fewer than 5 items exist)",
+    "queryType": "SPARSE_NEIGHBORS",
+    "seedEntities": [
+      "Quota_Exhaustion"
+    ],
+    "maxDepth": 1,
+    "groundTruthRelevantTripleIds": [
+      "rel_08"
+    ]
+  },
+  {
+    "queryId": "RET_AM_01",
+    "queryText": "Retrieve relations using case-unnormalized query: \"waterfall_router\"",
+    "queryType": "AMBIGUOUS",
+    "seedEntities": [
+      "Waterfall_Router"
+    ],
+    "maxDepth": 1,
+    "groundTruthRelevantTripleIds": [
+      "rel_01",
+      "rel_05",
+      "rel_06",
+      "rel_07"
+    ]
+  },
+  {
+    "queryId": "RET_AM_02",
+    "queryText": "Retrieve relations using case-unnormalized query: \"CIRCUIT_BREAKER\"",
+    "queryType": "AMBIGUOUS",
+    "seedEntities": [
+      "Circuit_Breaker"
+    ],
+    "maxDepth": 1,
+    "groundTruthRelevantTripleIds": [
+      "rel_07",
+      "rel_08",
+      "rel_09"
+    ]
+  },
+  {
+    "queryId": "RET_AM_03",
+    "queryText": "Retrieve relations using case-unnormalized query: \"subagent swarm\"",
+    "queryType": "AMBIGUOUS",
+    "seedEntities": [
+      "SubAgent_Swarm"
+    ],
+    "maxDepth": 1,
+    "groundTruthRelevantTripleIds": [
+      "rel_04",
+      "rel_12",
+      "rel_13",
+      "rel_14"
+    ]
+  },
+  {
+    "queryId": "RET_AM_04",
+    "queryText": "Retrieve relations using case-unnormalized query: \"sqlite storage\"",
+    "queryType": "AMBIGUOUS",
+    "seedEntities": [
+      "SQLite_Storage"
+    ],
+    "maxDepth": 1,
+    "groundTruthRelevantTripleIds": [
+      "rel_24",
+      "rel_25",
+      "rel_26"
+    ]
+  },
+  {
+    "queryId": "RET_AM_05",
+    "queryText": "Retrieve relations using case-unnormalized query: \"recovery engine\"",
+    "queryType": "AMBIGUOUS",
+    "seedEntities": [
+      "Recovery_Engine"
+    ],
+    "maxDepth": 1,
+    "groundTruthRelevantTripleIds": [
+      "rel_29",
+      "rel_30",
+      "rel_31",
+      "rel_32",
+      "rel_33"
+    ]
+  },
+  {
+    "queryId": "RET_ZM_01",
+    "queryText": "Negative control: Search relations for nonexistent entity \"Quantum_Neural_Copulation\"",
+    "queryType": "ZERO_MATCH",
+    "seedEntities": [
+      "Quantum_Neural_Copulation"
+    ],
+    "maxDepth": 1,
+    "groundTruthRelevantTripleIds": []
+  },
+  {
+    "queryId": "RET_ZM_02",
+    "queryText": "Negative control: Search relations for nonexistent entity \"Nonexistent_Hardware_Interface\"",
+    "queryType": "ZERO_MATCH",
+    "seedEntities": [
+      "Nonexistent_Hardware_Interface"
+    ],
+    "maxDepth": 1,
+    "groundTruthRelevantTripleIds": []
+  },
+  {
+    "queryId": "RET_ZM_03",
+    "queryText": "Negative control: Search relations for nonexistent entity \"Unregistered_Legacy_Component\"",
+    "queryType": "ZERO_MATCH",
+    "seedEntities": [
+      "Unregistered_Legacy_Component"
+    ],
+    "maxDepth": 1,
+    "groundTruthRelevantTripleIds": []
+  },
+  {
+    "queryId": "RET_ZM_04",
+    "queryText": "Negative control: Search relations for nonexistent entity \"Imaginary_Database_Driver\"",
+    "queryType": "ZERO_MATCH",
+    "seedEntities": [
+      "Imaginary_Database_Driver"
+    ],
+    "maxDepth": 1,
+    "groundTruthRelevantTripleIds": []
+  },
+  {
+    "queryId": "RET_ZM_05",
+    "queryText": "Negative control: Search relations for nonexistent entity \"External_Cloud_Service_XYZ\"",
+    "queryType": "ZERO_MATCH",
+    "seedEntities": [
+      "External_Cloud_Service_XYZ"
+    ],
+    "maxDepth": 1,
+    "groundTruthRelevantTripleIds": []
+  }
+]

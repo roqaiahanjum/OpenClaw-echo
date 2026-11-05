@@ -1,0 +1,101 @@
+trial_id,input_prompt,expected_class,predicted_class,is_match,latency_microseconds
+INT_001,"Hello there!",FAST_PATH_CONVERSATIONAL,FAST_PATH_CONVERSATIONAL,true,3623.8
+INT_002,"Good morning",FAST_PATH_CONVERSATIONAL,FAST_PATH_CONVERSATIONAL,true,1503.1
+INT_003,"Hey bot",FAST_PATH_CONVERSATIONAL,SINGLE_TOOL_AUTONOMOUS,false,966.7
+INT_004,"How are you doing today?",FAST_PATH_CONVERSATIONAL,SINGLE_TOOL_AUTONOMOUS,false,421.1
+INT_005,"Who are you?",FAST_PATH_CONVERSATIONAL,FAST_PATH_CONVERSATIONAL,true,45.5
+INT_006,"What is your name?",FAST_PATH_CONVERSATIONAL,FAST_PATH_CONVERSATIONAL,true,22
+INT_007,"Thank you so much!",FAST_PATH_CONVERSATIONAL,SINGLE_TOOL_AUTONOMOUS,false,15.7
+INT_008,"Thanks a lot",FAST_PATH_CONVERSATIONAL,FAST_PATH_CONVERSATIONAL,true,15.8
+INT_009,"Goodbye!",FAST_PATH_CONVERSATIONAL,FAST_PATH_CONVERSATIONAL,true,17.5
+INT_010,"See you later",FAST_PATH_CONVERSATIONAL,FAST_PATH_CONVERSATIONAL,true,30.9
+INT_011,"Nice to meet you",FAST_PATH_CONVERSATIONAL,SINGLE_TOOL_AUTONOMOUS,false,16.7
+INT_012,"Whats up?",FAST_PATH_CONVERSATIONAL,FAST_PATH_CONVERSATIONAL,true,12.2
+INT_013,"How do you do?",FAST_PATH_CONVERSATIONAL,SINGLE_TOOL_AUTONOMOUS,false,10.6
+INT_014,"OK",FAST_PATH_CONVERSATIONAL,FAST_PATH_CONVERSATIONAL,true,9.6
+INT_015,"Okay sounds good",FAST_PATH_CONVERSATIONAL,SINGLE_TOOL_AUTONOMOUS,false,11.7
+INT_016,"Got it; thanks!",FAST_PATH_CONVERSATIONAL,SINGLE_TOOL_AUTONOMOUS,false,10.9
+INT_017,"Tell me a joke",FAST_PATH_CONVERSATIONAL,FAST_PATH_CONVERSATIONAL,true,11.4
+INT_018,"Good evening OpenClaw",FAST_PATH_CONVERSATIONAL,SINGLE_TOOL_AUTONOMOUS,false,13.3
+INT_019,"What can you do?",FAST_PATH_CONVERSATIONAL,FAST_PATH_CONVERSATIONAL,true,11
+INT_020,"Farewell",FAST_PATH_CONVERSATIONAL,FAST_PATH_CONVERSATIONAL,true,10.1
+INT_021,"2+2",FAST_PATH_MATH,FAST_PATH_MATH,true,17.6
+INT_022,"15 * 4",FAST_PATH_MATH,FAST_PATH_MATH,true,15.7
+INT_023,"100 / 5",FAST_PATH_MATH,FAST_PATH_MATH,true,9.6
+INT_024,"25 - 7",FAST_PATH_MATH,FAST_PATH_MATH,true,9.3
+INT_025,"what is 50 + 50?",FAST_PATH_MATH,FAST_PATH_MATH,true,16.3
+INT_026,"calculate 12 * 12",FAST_PATH_MATH,FAST_PATH_MATH,true,14.6
+INT_027,"compute 1000 / 8",FAST_PATH_MATH,FAST_PATH_MATH,true,14.8
+INT_028,"what's 99 - 33?",FAST_PATH_MATH,FAST_PATH_MATH,true,9.3
+INT_029,"how much is 45 + 55",FAST_PATH_MATH,FAST_PATH_MATH,true,10.6
+INT_030,"eval 7 * 8",FAST_PATH_MATH,SINGLE_TOOL_AUTONOMOUS,false,7
+INT_031,"3.14 * 2",FAST_PATH_MATH,FAST_PATH_MATH,true,7.8
+INT_032,"10000 / 250",FAST_PATH_MATH,FAST_PATH_MATH,true,8.2
+INT_033,"what is 200 - 45",FAST_PATH_MATH,FAST_PATH_MATH,true,8.2
+INT_034,"calculate 14 * 5",FAST_PATH_MATH,FAST_PATH_MATH,true,8.5
+INT_035,"evaluate 90 / 3",FAST_PATH_MATH,FAST_PATH_MATH,true,8.5
+INT_036,"40 + 60",FAST_PATH_MATH,FAST_PATH_MATH,true,6.5
+INT_037,"123 + 456",FAST_PATH_MATH,FAST_PATH_MATH,true,7
+INT_038,"what is 81 / 9?",FAST_PATH_MATH,FAST_PATH_MATH,true,7.7
+INT_039,"calculate 7 * 7",FAST_PATH_MATH,FAST_PATH_MATH,true,8.5
+INT_040,"500 - 125",FAST_PATH_MATH,FAST_PATH_MATH,true,12.1
+INT_041,"search latest artificial intelligence papers",DIRECT_SEARCH,DIRECT_SEARCH,true,38.5
+INT_042,"find SQLite documentation online",DIRECT_SEARCH,DIRECT_SEARCH,true,18.3
+INT_043,"look up Node.js 20 changelog",DIRECT_SEARCH,DIRECT_SEARCH,true,7.8
+INT_044,"search transformer architecture updates",DIRECT_SEARCH,DIRECT_SEARCH,true,13.4
+INT_045,"search Groq Llama 3 latency benchmarks",DIRECT_SEARCH,DIRECT_SEARCH,true,11.8
+INT_046,"find LangChain memory store guide",DIRECT_SEARCH,DIRECT_SEARCH,true,9.7
+INT_047,"search Gemini 2.5 Flash token pricing",DIRECT_SEARCH,DIRECT_SEARCH,true,11.2
+INT_048,"look up TypeScript 5.6 release notes",DIRECT_SEARCH,DIRECT_SEARCH,true,7.5
+INT_049,"search current weather in Tokyo",DIRECT_SEARCH,DIRECT_SEARCH,true,10.7
+INT_050,"find Docker Compose v2 specification",DIRECT_SEARCH,DIRECT_SEARCH,true,14.4
+INT_051,"search Express vs Fastify performance",DIRECT_SEARCH,DIRECT_SEARCH,true,11.1
+INT_052,"search GraphRAG tutorial for Node.js",DIRECT_SEARCH,DIRECT_SEARCH,true,7.3
+INT_053,"find React 19 server actions documentation",DIRECT_SEARCH,DIRECT_SEARCH,true,15
+INT_054,"search Circuit Breaker design pattern in TypeScript",DIRECT_SEARCH,DIRECT_SEARCH,true,8.8
+INT_055,"look up Telegraf bot framework examples",DIRECT_SEARCH,DIRECT_SEARCH,true,14.3
+INT_056,"search latest open source LLM leaderboard",DIRECT_SEARCH,DIRECT_SEARCH,true,12
+INT_057,"find Chart.js responsive canvas options",DIRECT_SEARCH,DIRECT_SEARCH,true,7.2
+INT_058,"search SQLite WAL mode concurrency advantages",DIRECT_SEARCH,DIRECT_SEARCH,true,12.9
+INT_059,"search Vitest vs Jest execution speed",DIRECT_SEARCH,DIRECT_SEARCH,true,11
+INT_060,"look up Nodemailer SMTP configuration Gmail",DIRECT_SEARCH,DIRECT_SEARCH,true,10.8
+INT_061,"check git status of current repository",SINGLE_TOOL_AUTONOMOUS,SINGLE_TOOL_AUTONOMOUS,true,9.9
+INT_062,"view git log for the last 5 commits",SINGLE_TOOL_AUTONOMOUS,SINGLE_TOOL_AUTONOMOUS,true,9.7
+INT_063,"read package.json file and return contents",SINGLE_TOOL_AUTONOMOUS,SINGLE_TOOL_AUTONOMOUS,true,9.9
+INT_064,"what are my goals?",SINGLE_TOOL_AUTONOMOUS,SINGLE_TOOL_AUTONOMOUS,true,6.8
+INT_065,"add a goal: complete audit report",SINGLE_TOOL_AUTONOMOUS,SINGLE_TOOL_AUTONOMOUS,true,8.1
+INT_066,"remember user preference: prefers dark mode",SINGLE_TOOL_AUTONOMOUS,SINGLE_TOOL_AUTONOMOUS,true,8.9
+INT_067,"get memory stats across all layers",SINGLE_TOOL_AUTONOMOUS,SINGLE_TOOL_AUTONOMOUS,true,7.7
+INT_068,"retrieve all facts from sqlite knowledge base",SINGLE_TOOL_AUTONOMOUS,SINGLE_TOOL_AUTONOMOUS,true,9.2
+INT_069,"run system audit on local environment",SINGLE_TOOL_AUTONOMOUS,SINGLE_TOOL_AUTONOMOUS,true,6.2
+INT_070,"list scheduled background tasks",SINGLE_TOOL_AUTONOMOUS,SINGLE_TOOL_AUTONOMOUS,true,10.4
+INT_071,"calculate current timestamp in UTC",SINGLE_TOOL_AUTONOMOUS,SINGLE_TOOL_AUTONOMOUS,true,13.8
+INT_072,"delete file temp_notes.txt from sandbox",SINGLE_TOOL_AUTONOMOUS,SINGLE_TOOL_AUTONOMOUS,true,6.8
+INT_073,"search memory for user college name",SINGLE_TOOL_AUTONOMOUS,DIRECT_SEARCH,false,8.3
+INT_074,"save fact: project title is OpenClaw Echo",SINGLE_TOOL_AUTONOMOUS,SINGLE_TOOL_AUTONOMOUS,true,9.4
+INT_075,"view git diff on modified files",SINGLE_TOOL_AUTONOMOUS,SINGLE_TOOL_AUTONOMOUS,true,7.8
+INT_076,"update user profile with name Roqaiah",SINGLE_TOOL_AUTONOMOUS,SINGLE_TOOL_AUTONOMOUS,true,7.7
+INT_077,"check active cron schedules",SINGLE_TOOL_AUTONOMOUS,SINGLE_TOOL_AUTONOMOUS,true,9.3
+INT_078,"read file src/index.ts",SINGLE_TOOL_AUTONOMOUS,SINGLE_TOOL_AUTONOMOUS,true,6.8
+INT_079,"list files in local directory",SINGLE_TOOL_AUTONOMOUS,SINGLE_TOOL_AUTONOMOUS,true,8.1
+INT_080,"send test email report to admin@example.com",SINGLE_TOOL_AUTONOMOUS,SINGLE_TOOL_AUTONOMOUS,true,10.4
+INT_081,"research quantum computing advances; compare top 3 architectures; and write detailed report in sandbox",COMPLEX_SWARM,COMPLEX_SWARM,true,26.6
+INT_082,"first search AI agent frameworks; then write comparison file in sandbox; and finally email report",COMPLEX_SWARM,COMPLEX_SWARM,true,8.5
+INT_083,"audit repository dependencies; identify security vulnerabilities; and generate fix recommendations file",COMPLEX_SWARM,SINGLE_TOOL_AUTONOMOUS,false,15.1
+INT_084,"delegate research to researcher agent; code generation to coder agent; and verify with QA",COMPLEX_SWARM,SINGLE_TOOL_AUTONOMOUS,false,11
+INT_085,"scrape 3 news sources; contrast their perspectives; and compile a verified intelligence brief",COMPLEX_SWARM,COMPLEX_SWARM,true,8.7
+INT_086,"first create dataset in sandbox; then execute statistics script; and generate line chart visualization",COMPLEX_SWARM,COMPLEX_SWARM,true,5.1
+INT_087,"extract entities from interactions; build knowledge graph triples; and traverse multi-hop connections",COMPLEX_SWARM,SINGLE_TOOL_AUTONOMOUS,false,19.8
+INT_088,"research GraphRAG architectures; synthesize custom tool for entity extraction; and run sandbox validation",COMPLEX_SWARM,SINGLE_TOOL_AUTONOMOUS,false,10.8
+INT_089,"analyze server performance logs; plot response time distribution; and draft optimization roadmap",COMPLEX_SWARM,SINGLE_TOOL_AUTONOMOUS,false,20
+INT_090,"first read user profile from sqlite; cross-reference with vector history; and generate personalized plan",COMPLEX_SWARM,COMPLEX_SWARM,true,7.4
+INT_091,"synthesize new encryption tool; execute unit tests in sandbox; and commit changes to git repository",COMPLEX_SWARM,SINGLE_TOOL_AUTONOMOUS,false,9.6
+INT_092,"compare SQLite WAL mode vs rollback journal under heavy concurrent load; and prepare benchmark table",COMPLEX_SWARM,COMPLEX_SWARM,true,22.6
+INT_093,"first crawl documentation website; chunk content into embeddings; and index into vector store",COMPLEX_SWARM,COMPLEX_SWARM,true,12.2
+INT_094,"delegate task to analyst to process sales data and delegate task to writer to produce executive summary",COMPLEX_SWARM,COMPLEX_SWARM,true,55.5
+INT_095,"simulate chaos network disconnection; monitor telegraf polling recovery; and verify zero message loss",COMPLEX_SWARM,SINGLE_TOOL_AUTONOMOUS,false,20.5
+INT_096,"research latest LangChain release changes; check for deprecated APIs in codebase; and generate audit log",COMPLEX_SWARM,SINGLE_TOOL_AUTONOMOUS,false,21.9
+INT_097,"first ingest user research paper; run entity extraction for graph nodes; and link with sqlite facts",COMPLEX_SWARM,COMPLEX_SWARM,true,5.1
+INT_098,"build multi-step deployment pipeline: test TypeScript build; run lint; package docker container; and verify",COMPLEX_SWARM,COMPLEX_SWARM,true,8.5
+INT_099,"research circuit breaker design in distributed systems; write technical report; and save to sandbox",COMPLEX_SWARM,SINGLE_TOOL_AUTONOMOUS,false,10.7
+INT_100,"first check sqlite disk space; prune old interaction records beyond 90 days; and vacuum database file",COMPLEX_SWARM,COMPLEX_SWARM,true,8.5

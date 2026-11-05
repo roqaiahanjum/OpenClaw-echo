@@ -1,0 +1,14 @@
+# litestream.yml — SQLite Continuous Replication to Cloudflare R2
+# Compatible with Render Node.js environment
+dbs:
+  - path: ./openclaw.db
+    replicas:
+      - type: s3
+        bucket: "${R2_BUCKET_NAME}"
+        path: "openclaw-db"
+        endpoint: "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+        access-key-id: "${R2_ACCESS_KEY_ID}"
+        secret-access-key: "${R2_SECRET_ACCESS_KEY}"
+        sync-interval: 5s
+        retention: 720h # 30 days point-in-time recovery
+

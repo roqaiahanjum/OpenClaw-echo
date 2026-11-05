@@ -1,0 +1,4 @@
+component_pipeline,unit,sample_count,mean,median_p50,p95,min,max,std_dev,confidence_interval_95_pct
+Deterministic_Intent_Classifier,microseconds,100,77.24,10.70,55.50,5.10,3623.80,399.09,"[-0.98 - 155.47]"
+Knowledge_Graph_BFS_Traversal,milliseconds,50,0.61,0.56,0.93,0.34,1.30,0.18,"[0.56 - 0.66]"
+Controlled_Failover_Switchover,milliseconds,50,1.14,0.15,0.43,0.04,49.01,6.84,"[-0.75 - 3.04]"

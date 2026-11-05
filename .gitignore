@@ -1,21 +1,33 @@
+# Dependencies
 node_modules/
+
+# Secrets & Environment variables (NEVER commit secrets)
 .env
 .env.*
+*.env
 !.env.example
+
+# Build outputs
 dist/
 build/
 dashboard/dist/
+.tsbuildinfo
+
+# SQLite databases & temp files
 *.sqlite
 *.sqlite-journal
 *.db
 *.db*
 openclaw.db*
+
+# Logs & Debug
 npm-debug.log*
-.DS_Store
 *.log
 logs/
-.tsbuildinfo
+.DS_Store
 *.zip
+*.bak
+*.diff
 
 # Generated sandbox files & outputs
 src/sandbox/

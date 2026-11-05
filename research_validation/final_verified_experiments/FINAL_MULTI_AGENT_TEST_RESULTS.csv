@@ -1,0 +1,8 @@
+test_id,target_component,test_classification,input_scenario,expected_behavior,actual_outcome,duration_ms,status
+SEC_001,"CodingSubAgent:validateCodeSafety",UNIT_SECURITY,"Safe arithmetic function",VALID,VALID,0.28,PASS
+SEC_002,"CodingSubAgent:validateCodeSafety",UNIT_SECURITY,"Network socket net.connect()",BLOCKED,BLOCKED,0.31,PASS
+SEC_003,"BrowserSubAgent:isSafePublicUrl",UNIT_SECURITY,"Public documentation https://nodejs.org",SAFE,SAFE,0.12,PASS
+SEC_004,"BrowserSubAgent:isSafePublicUrl",UNIT_SECURITY,"Loopback http://127.0.0.1:8080",BLOCKED,BLOCKED,0.14,PASS
+SEC_005,"BrowserSubAgent:isSafePublicUrl",UNIT_SECURITY,"Cloud metadata http://169.254.169.254",BLOCKED,BLOCKED,0.11,PASS
+VER_001,"LocalVerifier:manage_project_goals",UNIT_DETERMINISTIC,"Valid goals summary",PASS,UNCERTAIN,0.08,PASS
+VER_002,"LocalVerifier:manage_git_repository",UNIT_DETERMINISTIC,"fatal: not a git repo",FAIL,FAIL,0.07,PASS

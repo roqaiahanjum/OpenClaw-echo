@@ -1,0 +1,5 @@
+test_id,workflow_name,subagents_invoked,is_parallel,dependencies_satisfied,execution_duration_ms,status,notes
+MA_WF_001,"Parallel Two-Worker Dispatch","ResearchSubAgent, CodingSubAgent",true,true,8379.01,PASS,"Parallel promise dispatch executed"
+MA_WF_002,"DAG Dependency Chain","ResearchSubAgent -> CodingSubAgent",false,true,13623.85,PASS,"Sequential prerequisite findings injected"
+MA_WF_003,"CodingSubAgent AST Security Guard","CodingSubAgent:validateCodeSafety",false,true,0.26,PASS,"Safe code valid: true, Network socket correctly blocked: true"
+MA_WF_004,"BrowserSubAgent SSRF Security Guard","BrowserSubAgent:isSafePublicUrl",false,true,1.36,PASS,"Public URL allowed: true, Localhost blocked: true, Metadata blocked: true"

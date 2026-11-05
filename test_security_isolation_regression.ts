@@ -164,6 +164,48 @@ async function runSecurityIsolationTests() {
         `Status: ${e2eResult.status}, Result: ${e2eResult.resultData.slice(0, 150)}`
     );
 
+    // -------------------------------------------------------------------------
+    // TEST 9: CodingSubAgent Blocked-Execution Response & Security Policy Gate
+    // -------------------------------------------------------------------------
+    console.log("\n--- TEST 9: CodingSubAgent Blocked-Execution Response ---");
+    const prevExecutionEnv = process.env.ENABLE_SANDBOX_EXECUTION;
+    const prevNodeEnv = process.env.NODE_ENV;
+    process.env.ENABLE_SANDBOX_EXECUTION = "false";
+    process.env.NODE_ENV = "production";
+
+    const blockedTask = {
+        taskId: `coding_blocked_${Date.now()}`,
+        parentId: "root",
+        targetAgent: "coding" as const,
+        taskDescription: "Write a python function to compute factorial and execute it.",
+        contextPayload: {}
+    };
+
+    const blockedResult = await codingWorker!.execute(blockedTask);
+    
+    // Restore environment
+    process.env.ENABLE_SANDBOX_EXECUTION = prevExecutionEnv;
+    process.env.NODE_ENV = prevNodeEnv;
+
+    const hasBlockedHeader = blockedResult.resultData.includes("Execution Status**: BLOCKED BY SECURITY POLICY");
+    const hasSecurityNotice = blockedResult.resultData.includes("Security Notice: Untrusted code execution is disabled");
+    const doesNotClaimExecuted = !blockedResult.resultData.includes("EXECUTED ✅");
+    const preservesCode = blockedResult.resultData.includes("Generated Code (Python)");
+    const preservesFile = blockedResult.resultData.includes("Saved File Status");
+    const verifiedIsFalse = blockedResult.verified === false;
+
+    assert(
+        blockedResult.status === "SUCCESS" &&
+        hasBlockedHeader &&
+        hasSecurityNotice &&
+        doesNotClaimExecuted &&
+        preservesCode &&
+        preservesFile &&
+        verifiedIsFalse,
+        "CodingSubAgent properly reports BLOCKED BY SECURITY POLICY without claiming execution",
+        `Header: ${hasBlockedHeader}, Notice: ${hasSecurityNotice}, NotExecuted: ${doesNotClaimExecuted}, VerifiedFalse: ${verifiedIsFalse}`
+    );
+
     // Cleanup generated test files
     for (const f of [testFileCamel, testFileLower]) {
         await fs.unlink(path.resolve(process.cwd(), "src", "sandbox", f)).catch(() => {});

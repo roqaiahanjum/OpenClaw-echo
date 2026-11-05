@@ -241,6 +241,7 @@ Please repair the code strictly for ${langInfo.name}.
 
             let executionReport = "⚙️ **Execution Status**: NOT REQUESTED";
             let executionSuccess = false;
+            let isBlockedByPolicy = false;
 
             if (shouldExecute) {
                 if (!fileVerified || !isCodeValid) {
@@ -250,12 +251,22 @@ Please repair the code strictly for ${langInfo.name}.
                     if (runTool) {
                         try {
                             const runOutput = String(await runTool.invoke({ fileName: targetFileName }));
-                            executionSuccess = !runOutput.includes("Execution failed") &&
-                                               !runOutput.includes("Safety Error") &&
-                                               !runOutput.includes("Safety Violation") &&
-                                               !runOutput.includes("Executed with errors");
-                            executionReport = `⚙️ **Execution Status**: ${executionSuccess ? 'EXECUTED ✅' : 'EXECUTION FAILED ❌'}\n\`\`\`\n${runOutput.trim()}\n\`\`\``;
+                            isBlockedByPolicy = runOutput.includes("Security Notice:") ||
+                                                runOutput.includes("Untrusted code execution is disabled");
+
+                            if (isBlockedByPolicy) {
+                                executionSuccess = false;
+                                executionReport = `⚙️ **Execution Status**: BLOCKED BY SECURITY POLICY\n\`\`\`\n${runOutput.trim()}\n\`\`\``;
+                            } else {
+                                executionSuccess = !runOutput.includes("Execution failed") &&
+                                                   !runOutput.includes("Safety Error") &&
+                                                   !runOutput.includes("Safety Violation") &&
+                                                   !runOutput.includes("Executed with errors") &&
+                                                   !runOutput.includes("timed out");
+                                executionReport = `⚙️ **Execution Status**: ${executionSuccess ? 'EXECUTED ✅' : 'EXECUTION FAILED ❌'}\n\`\`\`\n${runOutput.trim()}\n\`\`\``;
+                            }
                         } catch (toolExecErr: any) {
+                            executionSuccess = false;
                             executionReport = `⚙️ **Execution Status**: EXECUTION FAILED ❌ (${toolExecErr.message})`;
                         }
                     } else {
@@ -265,29 +276,40 @@ Please repair the code strictly for ${langInfo.name}.
             }
 
             const executionTimeMs = Date.now() - startTime;
-            const overallSuccess = isCodeValid && toolSuccess && fileVerified && (!shouldExecute || executionSuccess);
+            const overallSuccess = isCodeValid && toolSuccess && fileVerified && (!shouldExecute || executionSuccess || isBlockedByPolicy);
 
             const resultData = [
                 `### 1. Generated Code (${langInfo.name})`,
                 generatedCode,
                 `*${syntaxStatus}*`,
                 `*${safetyStatus}*`,
-                ``,
+                "",
                 `### 2. Saved File Status`,
                 savedFileReport,
-                ``,
+                "",
                 `### 3. Execution Status`,
                 executionReport
             ].join("\n");
+
+            let verificationReason = `${langInfo.name} code validation or execution failed`;
+            if (overallSuccess) {
+                if (isBlockedByPolicy) {
+                    verificationReason = `${langInfo.name} code verified and saved to sandbox; execution blocked by security policy`;
+                } else if (shouldExecute && executionSuccess) {
+                    verificationReason = `${langInfo.name} code verified, saved, and executed`;
+                } else {
+                    verificationReason = `${langInfo.name} code syntax and file persistence verified`;
+                }
+            }
 
             return {
                 taskId: task.taskId,
                 targetAgent: this.agentType,
                 status: overallSuccess ? "SUCCESS" : "FAILED",
                 toolName: shouldExecute ? "run_sandbox_code" : "write_sandbox_file",
-                toolOutput: { savedFileReport, executionReport },
-                verified: overallSuccess,
-                verificationReason: overallSuccess ? (shouldExecute ? `${langInfo.name} code verified, saved, and executed` : `${langInfo.name} code syntax and file persistence verified`) : `${langInfo.name} code validation or execution failed`,
+                toolOutput: { savedFileReport, executionReport, executed: executionSuccess, blockedByPolicy: isBlockedByPolicy },
+                verified: overallSuccess && (!shouldExecute || executionSuccess),
+                verificationReason,
                 resultData: overallSuccess ? resultData : `⚠️ [CodingSubAgent Failure]: ${!isCodeValid ? (!syntaxResult.valid ? syntaxResult.error : safetyResult.reason) : (shouldExecute && !executionSuccess ? 'Execution failed' : 'File write failed')}\n\n${resultData}`,
                 error: overallSuccess ? undefined : (syntaxResult.error || safetyResult.reason || writeToolResult),
                 executionTimeMs
